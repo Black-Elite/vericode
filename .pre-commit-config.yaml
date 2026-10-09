@@ -7,5 +7,3 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        # without this, pre-commit hides the report whenever the commit passes
-        verbose: true
