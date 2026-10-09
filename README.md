@@ -1,65 +1,78 @@
 # Vericode
 
-> "AI writes code that doesn't exist. Vericode catches it before it ships."
+> "AI writes code that looks right. Vericode catches what isn't, and a local AI tells you which warnings are real."
 
-Offline AI code verification — a Git pre-commit hook that uses a local LLM to
-catch hallucinated imports, insecure code, and false-positive noise in staged
-changes. No cloud, no uploads: source code never leaves your laptop.
+A Git pre-commit hook that flags hallucinated packages, slopsquatting risks,
+hardcoded secrets and dangerous calls in the lines you're committing, then has
+a local AI judge each one, explain it and write the fix. It runs on an ordinary
+laptop with no GPU, and nothing is uploaded: your code and secrets never leave
+the machine.
 
 Built for **AppBuildersPH Hackathon 2026** (theme: Local AI).
 
 ## Why local AI
 
-Cloud code reviewers require uploading private source code. Static linters
-can't judge whether an API call actually exists, or explain *why* something
-is risky in plain language — that needs an LLM, and it has to run locally or
-the tool defeats its own trust model. See `is_real_risk` / `risk_reasoning` /
-`explanation` / `fixed_code` in [`vericode/llm_explain/`](vericode/llm_explain/)
-for where that reasoning happens.
+Vericode reads your private code on every commit: the changed files, the code
+around each problem, and any secrets it finds. Doing that with a cloud AI means
+uploading that code and those secrets to someone else's server, which is
+exactly what companies like Samsung banned after source code leaked through a
+cloud AI tool. Running a small model (Qwen2.5-Coder 1.5B, which judges each
+finding and writes the fix) on the developer's own laptop, even one with no
+GPU, keeps code private, works on flights and locked-down networks, has no
+per-scan cost, and stays fast enough to run on every commit. A tool meant to
+make AI code trustworthy shouldn't leak the code it's protecting.
 
-## Architecture
+## How it works
 
 ```
-staged files
+staged files (only the lines this commit adds are reported)
    │
-   ├─► vericode/import_check   (fast, no AI — flags hallucinated packages)
-   ├─► vericode/security_scan  (Semgrep, offline rulesets)
-   │
+   ├─► vericode/import_check   no AI: packages that don't exist on PyPI (high),
+   │                            obscure ones that may be slopsquats (medium)
+   ├─► vericode/security_scan  no AI: Betterleaks for secrets; a built-in check for
+   │                            eval / exec / os.system / shell=True; Semgrep (optional)
    ▼
-vericode/llm_explain  (local LLM — triages false positives, explains, fixes)
-   │
+vericode/llm_explain  local AI (Qwen2.5-Coder 1.5B via Ollama):
+   │                  1. code analysis states what reaches the flagged line
+   │                     ("host comes from sys.argv", "only date.today()")
+   │                  2. the model judges real risk vs. false alarm, explains, writes the fix
+   │                  3. a false alarm only counts when that evidence agrees
    ▼
-vericode/gate  (renders report, blocks or allows the commit)
+vericode/gate  report, then blocks or allows the commit
 ```
 
-Each layer is independently buildable — see the `CLAUDE.md` in each
-`vericode/<layer>/` folder for that module's spec and "done when" checklist.
+- Secret values are blanked before the model sees the code and again in its answer.
+- Fake-import findings skip the model: it can't clear them, and Layer 1's "Did you mean" is a better fix.
+- At most 3 findings per commit go to the model, most severe first.
+
+Each layer has a `CLAUDE.md` in its folder with its spec and "done when" checklist.
 
 ## Prerequisites
 
-Install these yourself first — `./setup.sh` checks for them but can't install them for you:
+Install these yourself first. `./setup.sh` checks for them but can't install them for you:
 
-- **[uv](https://docs.astral.sh/uv/)** — Manages Python (3.11+, auto-installed by `uv` if missing) and all dependencies.
+- **[uv](https://docs.astral.sh/uv/)**: manages Python (3.11+, installed by uv if missing) and all dependencies.
 - **[Ollama](https://ollama.com)**, running, before you run `setup.sh`:
   - Windows / Mac: installer from ollama.com.
   - Arch: `sudo pacman -S ollama`.
   - Anything else: see ollama.com/download.
-- **git** — to clone this repo and for `pre-commit` to hook into.
+- **git**: to clone this repo and for `pre-commit` to hook into.
 
-Everything else (Rich, Semgrep, pytest, pre-commit, the `ollama` Python client, the Qwen2.5-Coder model) is installed by `./setup.sh`.
+Everything else (Rich, Semgrep, Betterleaks, pytest, pre-commit, the `ollama`
+Python client, the Qwen2.5-Coder 1.5B model) is installed by `./setup.sh`.
 
 ## Setup
 
 ```bash
-./setup.sh      # one-time: uv sync, pulls the Ollama model, caches Semgrep rules, builds the package snapshot
+./setup.sh      # one-time: uv sync, pulls the model, caches Semgrep rules, builds the PyPI name lists
 uv run pre-commit install
 ```
 
-Needs internet only for this one-time step — everything runs offline after.
+Needs internet only for this one-time step. Everything runs offline after.
 
 ## Usage
 
-Just commit normally:
+Commit normally:
 
 ```bash
 git add .
@@ -67,25 +80,73 @@ git commit -m "..."
 ```
 
 Vericode runs automatically. A blocked commit can be forced through with
-`VERICODE_OVERRIDE=1 git commit ...` after reviewing the report.
+`VERICODE_OVERRIDE=1 git commit ...` after reviewing the report; the override is
+shown in the output.
+
+| Setting | Default | Use |
+|---|---|---|
+| `VERICODE_MODEL` | first installed of `qwen2.5-coder:1.5b`, `:3b`, `:7b` | Pick the model |
+| `VERICODE_TIMEOUT` | `30` seconds | Time limit per AI call |
+| `VERICODE_MAX_AI_FINDINGS` | `3` | Findings sent to the AI per commit |
+| `VERICODE_SEMGREP` | off | `1` adds Semgrep's broader rules (about 3s slower) |
+| `VERICODE_KEEP_ALIVE` | `30m` | How long Ollama keeps the model loaded |
+| `VERICODE_OVERRIDE` | off | `1` commits anyway |
+
+## Demo
+
+`demo_repo/demo.sh` builds a throwaway repo with the hook installed:
+`reset` (a commit that gets blocked), `fix` (one that passes), `act2` (two
+identical warnings where the AI clears one and confirms the other) and `warm`
+(loads the model right before presenting). See [`demo_repo/README.md`](demo_repo/README.md).
+
+Measured on a laptop with no GPU: about 1 second for the static checks, about
+8 seconds per AI-reviewed finding; demo act 1 in about 9s, act 2 in about 16s.
 
 ## What runs locally vs. what needs internet
 
-Everything runs locally at commit time — import checking, security scanning,
-and LLM inference. Internet is only used once, during `setup.sh`, to download
-the model, cache Semgrep's rulesets, and build the offline package snapshot.
+**At commit time, everything runs locally:** import checking, secret and call
+scanning, the evidence helper and the AI model. No network calls are made;
+Betterleaks' live key validation is turned off.
+
+**Internet is used once, by `./setup.sh`,** to download the model, Semgrep's
+rules and the PyPI name lists.
+
+## Known limitations
+
+- Python only (except secret scanning, which covers any file).
+- By default, only the most dangerous calls are checked; SQL injection and similar need `VERICODE_SEMGREP=1`.
+- The 1.5B model sometimes calls a placeholder secret (e.g. `"changeme"`) a real risk. This blocks the commit, which is the safe direction.
+- The AI's fix is a suggestion: in testing, one "fix" for `eval(input())` returned the same unsafe line.
 
 ## Disclosures
 
-- Model: Qwen2.5-Coder-7B (Q4_K_M), via Ollama
-- Security rules: Semgrep (`p/secrets`, `p/python`)
-- Parsing: Python `ast`, `importlib`, `sys.stdlib_module_names`
-- Report rendering: Rich
-- Hook framework: `pre-commit`
+**Models**
+- [Qwen2.5-Coder 1.5B](https://ollama.com/library/qwen2.5-coder) (default), run locally via Ollama. 3B or 7B can be used via `VERICODE_MODEL`.
+
+**Technologies and frameworks**
+- Python 3.11+, managed with [uv](https://docs.astral.sh/uv/)
+- [Ollama](https://ollama.com) and its Python client
+- [Betterleaks](https://github.com/siemens/betterleaks) via `pybetterleaks` (secret scanning)
+- [Semgrep](https://semgrep.dev) community rules (optional)
+- [Rich](https://github.com/Textualize/rich) (report), [pre-commit](https://pre-commit.com) (hook), PyYAML, certifi, pytest
+- Python standard library: `ast`, `importlib`, `sys.stdlib_module_names`
+
+**APIs and cloud services**
+- None at commit time.
+- During one-time setup only: the Ollama model library, pypi.org, the top-pypi-packages list on GitHub Pages, and the Semgrep rule registry.
+
+**Existing code and assets**
+- PyPI's public package index and [top-pypi-packages](https://hugovk.github.io/top-pypi-packages/) (package name lists)
+- Semgrep community rules (downloaded by `scripts/build_semgrep_rules.py`)
+- All other code in this repository was written during the hackathon.
+
+**AI development tools**
+- [Claude Code](https://claude.com/claude-code) was used to help write code, tests and documentation.
 
 ## Development
 
 ```bash
 uv sync --dev
-uv run pytest tests/
+uv run pytest tests/                 # unit tests, no model needed
+uv run pytest -m live -s -v          # against the real local model (needs Ollama running)
 ```
