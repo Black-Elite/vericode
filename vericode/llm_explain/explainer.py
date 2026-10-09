@@ -18,7 +18,9 @@ from vericode.shared.finding import Finding
 PRIMARY_MODEL = "qwen2.5-coder:7b"
 FALLBACK_MODEL = "qwen2.5-coder:3b"
 TIMEOUT_SECONDS = 10.0
+MAX_AI_FINDINGS = 3
 CONTEXT_LINES = 5
+SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
 PROMPT_TEMPLATE = """You are a code security reviewer. A static check flagged this issue:
 Issue: {message}
@@ -46,8 +48,26 @@ def build_code_context(file: str, line: int, radius: int = CONTEXT_LINES) -> str
     )
 
 
+def _env_number(name: str, default: float, cast=float):
+    try:
+        value = cast(os.environ.get(name, default))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def timeout_seconds() -> float:
+    """VERICODE_TIMEOUT override; CPU-only laptops need more than the default."""
+    return _env_number("VERICODE_TIMEOUT", TIMEOUT_SECONDS)
+
+
+def max_ai_findings() -> int:
+    """VERICODE_MAX_AI_FINDINGS override; caps LLM calls per commit."""
+    return _env_number("VERICODE_MAX_AI_FINDINGS", MAX_AI_FINDINGS, int)
+
+
 def _client() -> ollama.Client:
-    return ollama.Client(timeout=TIMEOUT_SECONDS)
+    return ollama.Client(timeout=timeout_seconds())
 
 
 @lru_cache(maxsize=1)
@@ -152,7 +172,18 @@ def enrich(findings: list[Finding]) -> list[Finding]:
     downgrade severity when is_real_risk is False instead of dropping it.
     Never raises: on LLM failure the finding is left as-is with a note in
     `explanation` (is_real_risk stays None so the gate still treats it as real).
+
+    Only the most severe max_ai_findings() findings go to the LLM, to keep
+    the commit fast; the rest keep is_real_risk=None, so the gate still
+    treats them as real. Returned in the original order.
     """
-    for finding in findings:
+    ranked = sorted(findings, key=lambda f: SEVERITY_RANK.get(f.severity, len(SEVERITY_RANK)))
+    limit = max_ai_findings()
+    for finding in ranked[:limit]:
         _enrich_one(finding)
+    for finding in ranked[limit:]:
+        finding.explanation = (
+            f"Not reviewed by the local AI (limit of {limit} per commit; "
+            f"set VERICODE_MAX_AI_FINDINGS to raise it)."
+        )
     return findings

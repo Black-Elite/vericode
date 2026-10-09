@@ -47,10 +47,30 @@ Respond as JSON: {"is_real_risk": bool, "risk_reasoning": str,
    call the LLM on findings already flagged by Layer 1/2 — never run it over
    clean code.
 
+## Settings (environment variables)
+
+| Variable | Default | Use |
+|---|---|---|
+| `VERICODE_MODEL` | `qwen2.5-coder:7b`, else `:3b` if only that is pulled | Pick a model without editing code |
+| `VERICODE_TIMEOUT` | `10` seconds | Raise it on CPU-only laptops, where calls are slower |
+| `VERICODE_MAX_AI_FINDINGS` | `3` | Only the most severe findings go to the AI, to keep commits fast. The rest keep `is_real_risk=None`, so the gate still treats them as real |
+
+## Tests
+
+- `uv run pytest tests/test_llm_explain.py`: unit tests with faked AI replies. No model needed.
+- `uv run pytest -m live -s -v`: runs against the real local model (skips if Ollama isn't running). Run it again with wifi off; it must still pass.
+
+## Consistency add-on
+
+If the codebase consistency check ships, it puts its evidence in the Finding's
+`message` (e.g. "4 of 5 similar handlers raise ForbiddenError before deleting;
+this one doesn't"). The prompt already includes `message`, so no change is needed here.
+
 ## Done when
 
 - Given a sample Finding, returns an explanation + fix within ~3-5 seconds.
 - Confirmed working with the network/wifi off.
+- `uv run pytest -m live` passes on the presentation laptop, with and without wifi.
 
 ## Gotchas
 
