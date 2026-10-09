@@ -1,0 +1,24 @@
+"""Tiny notes store backed by SQLite."""
+
+import sqlite3
+from pathlib import Path
+
+DB_PATH = Path("notes.db")
+
+
+def connect():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, title TEXT, body TEXT, due TEXT)"
+    )
+    return conn
+
+
+def add_note(title, body, due=None):
+    with connect() as conn:
+        conn.execute("INSERT INTO notes (title, body, due) VALUES (?, ?, ?)", (title, body, due))
+
+
+def list_notes():
+    with connect() as conn:
+        return conn.execute("SELECT id, title, body, due FROM notes ORDER BY id").fetchall()

@@ -1,0 +1,12 @@
+"""Export all notes to a single PDF."""
+
+from markdown_pdf import MarkdownPdf, Section
+
+from notes import list_notes
+
+
+def export_pdf(path="notes.pdf"):
+    pdf = MarkdownPdf()
+    for _, title, body, _ in list_notes():
+        pdf.add_section(Section(f"# {title}\n\n{body}"))
+    pdf.save(path)
