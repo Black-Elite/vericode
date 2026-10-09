@@ -9,3 +9,4 @@ vericode/security_scan/data/
 .semgrep/
 CLAUDE.local.md
 .DS_Store
+.cursor/
