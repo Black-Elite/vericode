@@ -4,7 +4,7 @@ __pycache__/
 venv/
 *.egg-info/
 .pytest_cache/
-vericode/import_check/pypi_snapshot.json
+vericode/import_check/data/
 .semgrep/
 CLAUDE.local.md
 .DS_Store
