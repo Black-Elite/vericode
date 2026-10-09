@@ -91,7 +91,7 @@ def _betterleaks(files: list[str]) -> list[Finding]:
             findings.append(Finding(
                 layer="security_scan",
                 file=file,
-                line=leak.line + 1,  # betterleaks counts from 0
+                line=(leak.line or 0) + 1,  # counts from 0, and omits the 0
                 severity="high",
                 message=(
                     f"{leak.description} A credential committed to Git stays in its history "
