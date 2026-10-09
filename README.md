@@ -3,7 +3,8 @@
 > "AI writes code that looks right. Vericode catches what isn't, and a local AI tells you which warnings are real."
 
 A Git pre-commit hook that flags hallucinated packages, slopsquatting risks,
-hardcoded secrets and dangerous calls in the lines you're committing, then has
+hardcoded secrets, dangerous calls, and new code that skips a safety check the
+rest of your codebase always runs, in the lines you're committing, then has
 a local AI judge each one, explain it and write the fix. It runs on an ordinary
 laptop with no GPU, and nothing is uploaded: your code and secrets never leave
 the machine.
@@ -31,6 +32,9 @@ staged files (only the lines this commit adds are reported)
    │                            obscure ones that may be slopsquats (medium)
    ├─► vericode/security_scan  no AI: Betterleaks for secrets; a built-in check for
    │                            eval / exec / os.system / shell=True; Semgrep (optional)
+   ├─► vericode/consistency    no AI: compares new code with the rest of the repo:
+   │                            a handler that skips the check its siblings all run
+   │                            ("4 of 4 @route handlers call check_owner()"), or copied logic
    ▼
 vericode/llm_explain  local AI (Qwen2.5-Coder 1.5B via Ollama):
    │                  1. code analysis states what reaches the flagged line
@@ -96,11 +100,13 @@ shown in the output.
 
 `demo_repo/demo.sh` builds a throwaway repo with the hook installed:
 `reset` (a commit that gets blocked), `fix` (one that passes), `act2` (two
-identical warnings where the AI clears one and confirms the other) and `warm`
+identical warnings where the AI clears one and confirms the other), `act3` (a
+new handler that skips the ownership check its four siblings run) and `warm`
 (loads the model right before presenting). See [`demo_repo/README.md`](demo_repo/README.md).
 
 Measured on a laptop with no GPU: about 1 second for the static checks, about
-8 seconds per AI-reviewed finding; demo act 1 in about 9s, act 2 in about 16s.
+8 seconds per AI-reviewed finding; demo act 1 in about 9s, act 2 in about 16s,
+act 3 in about 4–9s.
 
 ## What runs locally vs. what needs internet
 
@@ -117,6 +123,7 @@ rules and the PyPI name lists.
 - By default, only the most dangerous calls are checked; SQL injection and similar need `VERICODE_SEMGREP=1`.
 - The 1.5B model sometimes calls a placeholder secret (e.g. `"changeme"`) a real risk. This blocks the commit, which is the safe direction.
 - The AI's fix is a suggestion: in testing, one "fix" for `eval(input())` returned the same unsafe line.
+- The consistency check needs at least 3 sibling handlers sharing a decorator, and only compares guard-like calls (`check_owner`, `require_login`, ...). Duplicates are found only when the structure matches; rewritten copies are missed.
 
 ## Disclosures
 

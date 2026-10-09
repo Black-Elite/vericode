@@ -325,3 +325,19 @@ def test_warm_up_never_raises_when_ollama_is_down(monkeypatch):
     monkeypatch.setattr(explainer, "_client", lambda: DownClient())
     assert explainer.warm_up() is None
     explainer.pick_model.cache_clear()
+
+
+def test_consistency_findings_keep_the_layers_exact_fix(monkeypatch, tmp_path):
+    src = tmp_path / "api.py"
+    src.write_text("@route('DELETE', '/x')\ndef delete_note(note_id, user):\n    db.delete(note_id)\n")
+    monkeypatch.setattr(
+        explainer, "_chat",
+        lambda p: '{"reason": "Every other handler checks first.", "is_real_risk": true, "fix": "require_admin(user)"}',
+    )
+    f = Finding(layer="consistency", file=str(src), line=2, severity="high",
+                message="4 of 4 similar handlers call check_owner()", suggested_fix="Add check_owner(note, user)")
+    [r] = enrich([f])
+    assert r.is_real_risk is True
+    assert r.explanation == "Every other handler checks first."
+    assert r.fixed_code is None
+    assert r.suggested_fix == "Add check_owner(note, user)"

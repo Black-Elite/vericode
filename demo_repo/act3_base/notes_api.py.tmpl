@@ -1,0 +1,48 @@
+"""HTTP handlers for the notes app."""
+
+from datetime import date
+
+import db
+from auth import check_owner
+from router import route
+
+
+@route("GET", "/notes/<note_id>")
+def get_note(note_id, user):
+    note = db.get(note_id)
+    check_owner(note, user)
+    return note
+
+
+@route("PUT", "/notes/<note_id>")
+def update_note(note_id, user, body):
+    note = db.get(note_id)
+    check_owner(note, user)
+    note.body = body
+    db.save(note)
+    return note
+
+
+@route("POST", "/notes/<note_id>/share")
+def share_note(note_id, user, email):
+    note = db.get(note_id)
+    check_owner(note, user)
+    note.shared_with.append(email)
+    db.save(note)
+    return note
+
+
+@route("POST", "/notes/<note_id>/archive")
+def archive_note(note_id, user):
+    note = db.get(note_id)
+    check_owner(note, user)
+    note.archived = True
+    db.save(note)
+    return note
+
+
+def format_due(note):
+    if not note.due:
+        return "no due date"
+    days = (note.due - date.today()).days
+    return f"due in {days} days" if days >= 0 else f"overdue by {-days} days"

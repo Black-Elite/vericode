@@ -19,13 +19,19 @@ from rich.table import Table
 from rich.text import Text
 
 from vericode.gate.ui import header, override_hint, render_error, robot_banner, use_ascii
+from vericode.consistency.checker import run as run_consistency
 from vericode.import_check.checker import run as run_import_check
 from vericode.llm_explain.explainer import enrich
 from vericode.security_scan.scanner import run as run_security_scan
 from vericode.shared.finding import Finding
 
 SEVERITY_STYLE = {"high": "bold red", "medium": "yellow", "low": "dim"}
-LAYER_LABEL = {"import_check": "import", "security_scan": "security", "llm_explain": "ai"}
+LAYER_LABEL = {
+    "import_check": "import",
+    "security_scan": "security",
+    "llm_explain": "ai",
+    "consistency": "consistency",
+}
 _SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 _PATCH_LINE_LIMIT = 12
 
@@ -192,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        findings = run_import_check(staged) + run_security_scan(staged)
+        findings = run_import_check(staged) + run_security_scan(staged) + run_consistency(staged)
         findings = [finding for finding in findings if finding.line in added.get(finding.file, ())]
         enrich([finding for finding in findings if finding.severity in ("high", "medium")])
     except FileNotFoundError as exc:
