@@ -20,9 +20,7 @@ ollama pull qwen2.5-coder:7b
 # ollama pull qwen2.5-coder:3b
 
 echo "== Caching Semgrep offline rulesets =="
-# --dryrun caches nothing; fetch the rules as files so commit-time stays offline.
-# p/python was framework-only (django/flask taint sources) and missed plain
-# os.system / eval, so it's replaced by security-audit + the syscall rule.
+# --dryrun caches nothing, so fetch the rules as files
 mkdir -p vericode/security_scan/data
 curl -fsSL -o vericode/security_scan/data/secrets.yml https://semgrep.dev/c/p/secrets
 curl -fsSL -o vericode/security_scan/data/security-audit.yml https://semgrep.dev/c/p/security-audit
