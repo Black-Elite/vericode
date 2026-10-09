@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -21,6 +22,7 @@ from vericode.shared.finding import Finding
 console = Console(highlight=False)
 
 SEVERITY_STYLE = {"high": "bold red", "medium": "yellow", "low": "dim"}
+LAYER_LABEL = {"import_check": "import", "security_scan": "security", "llm_explain": "ai"}
 
 
 def get_staged_files() -> list[str]:
@@ -55,25 +57,42 @@ def added_lines() -> dict[str, set[int]]:
 
 
 def render_report(findings: list[Finding]) -> None:
+    # Only show the AI column when the model actually answered for something;
+    # otherwise every row repeats the same "unavailable" notice.
+    reviewed = any(f.is_real_risk is not None for f in findings)
+
     for file in dict.fromkeys(f.file for f in findings):
-        table = Table(title=file, title_justify="left", title_style="bold")
-        table.add_column("Line", justify="right")
-        table.add_column("Severity")
-        table.add_column("Issue")
-        table.add_column("Why", max_width=50)
-        table.add_column("Suggested fix", max_width=40)
+        console.print(f"\n[bold underline]{file}[/]")
+        table = Table(box=box.SIMPLE_HEAD, pad_edge=False, show_edge=False)
+        table.add_column("Line", justify="right", style="cyan", no_wrap=True)
+        table.add_column("Severity", no_wrap=True)
+        table.add_column("Check", style="dim", no_wrap=True)
+        table.add_column("Issue", ratio=3)
+        if reviewed:
+            table.add_column("Local AI", ratio=2)
+        table.add_column("Fix", ratio=2, style="green")
+
         for f in (x for x in findings if x.file == file):
-            message = f.message
+            severity = f"[{SEVERITY_STYLE.get(f.severity, '')}]{f.severity}[/]"
             if f.is_real_risk is False:
-                message += "\n[dim](local AI: likely a false positive)[/dim]"
-            table.add_row(
+                severity += "\n[dim]dismissed[/]"
+            row = [
                 str(f.line),
-                f"[{SEVERITY_STYLE.get(f.severity, '')}]{f.severity}[/]",
-                message,
-                f.explanation or f.risk_reasoning or "",
-                f.fixed_code or f.suggested_fix or "",
-            )
+                severity,
+                LAYER_LABEL.get(f.layer, f.layer),
+                f.message,
+            ]
+            if reviewed:
+                row.append(f.explanation or f.risk_reasoning or "[dim]—[/]"
+                           if f.is_real_risk is not None else "[dim]—[/]")
+            row.append(f.fixed_code or f.suggested_fix or "")
+            table.add_row(*row)
         console.print(table)
+
+    skipped = {f.explanation for f in findings
+               if f.is_real_risk is None and f.explanation}
+    for note in sorted(skipped):
+        console.print(f"[dim]{note}[/]")
 
 
 def main() -> int:
