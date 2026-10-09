@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: vericode
+        name: Vericode (offline AI code verification)
+        entry: python -m vericode.gate.cli
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+vericode/import_check/pypi_snapshot.json
+.semgrep/
+CLAUDE.local.md
+.DS_Store
