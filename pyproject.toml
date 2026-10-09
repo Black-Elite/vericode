@@ -19,6 +19,7 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = ["live: runs against the real local Ollama model (skipped if unavailable)"]
 
 [build-system]
 requires = ["hatchling"]
