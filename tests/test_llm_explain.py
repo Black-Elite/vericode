@@ -41,16 +41,42 @@ def test_enrich_fills_fields(monkeypatch, sample):
     assert '> 2: KEY = "sk-123"' in prompts[0]  # context with marker
 
 
-def test_false_positive_downgraded_not_dropped(monkeypatch, sample):
-    monkeypatch.setattr(
-        explainer, "_chat",
-        lambda p: '{"is_real_risk": false, "risk_reasoning": "test fixture", '
-                  '"explanation": "Fake.", "fixed_code": ""}',
-    )
-    result = enrich([make_finding(sample)])
+DISMISS = '{"reason": "No outside input reaches it.", "is_real_risk": false, "fix": ""}'
+
+
+def test_false_positive_with_supporting_evidence_is_downgraded_not_dropped(monkeypatch, tmp_path):
+    src = tmp_path / "tools.py"
+    src.write_text("import subprocess\n\nsubprocess.run('git status', shell=True)\n")
+    monkeypatch.setattr(explainer, "_chat", lambda p: DISMISS)
+    result = enrich([make_finding(src, line=3)])
     assert len(result) == 1
     assert result[0].is_real_risk is False
     assert result[0].severity == "low"
+
+
+def test_ai_cannot_dismiss_a_real_looking_secret(monkeypatch, sample):
+    monkeypatch.setattr(explainer, "_chat", lambda p: DISMISS)
+    [f] = enrich([make_finding(sample)])
+    assert f.is_real_risk is None  # gate still treats it as real
+    assert f.severity == "high"
+    assert "still counts" in f.explanation
+
+
+def test_prompt_includes_static_evidence(monkeypatch, tmp_path):
+    src = tmp_path / "ping.py"
+    src.write_text("import os\nimport sys\n\nos.system('ping ' + sys.argv[1])\n")
+    prompts = []
+    monkeypatch.setattr(explainer, "_chat", lambda p: prompts.append(p) or GOOD)
+    enrich([make_finding(src, line=4)])
+    assert "Static analysis found: Outside input reaches this call" in prompts[0]
+    assert "sys.argv" in prompts[0]
+
+
+def test_reason_first_answer_is_parsed():
+    out = parse_response('{"reason": "user input", "is_real_risk": true, "fix": "subprocess.run([...])"}')
+    assert out["is_real_risk"] is True
+    assert out["risk_reasoning"] == out["explanation"] == "user input"
+    assert out["fixed_code"] == "subprocess.run([...])"
 
 
 def test_json_embedded_in_prose():

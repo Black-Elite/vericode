@@ -13,25 +13,40 @@ from pathlib import Path
 
 import ollama
 
+from vericode.llm_explain import evidence
 from vericode.shared.finding import Finding
 
-PRIMARY_MODEL = "qwen2.5-coder:7b"
+# 1.5b: 6/7 verdicts at ~8s per finding on a CPU-only laptop in our benchmark.
+PRIMARY_MODEL = "qwen2.5-coder:1.5b"
 FALLBACK_MODEL = "qwen2.5-coder:3b"
+OTHER_MODELS = ("qwen2.5-coder:7b",)
+MAX_ANSWER_TOKENS = 200
 TIMEOUT_SECONDS = 10.0
 MAX_AI_FINDINGS = 3
 KEEP_ALIVE = "30m"
 CONTEXT_LINES = 5
 SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
-PROMPT_TEMPLATE = """You are a code security reviewer. A static check flagged this issue:
-Issue: {message}
-File: {file}, Line: {line}
-Code (with surrounding context):
+PROMPT_TEMPLATE = """A security scanner flagged line {line} of {file}:
+{message}
+{evidence}
+Code (">" marks the flagged line; secrets are replaced with {redacted}):
 {code_context}
 
-Decide if this is a real risk given the context, or a false positive. Then explain why in 2-3 plain-English sentences, and write the corrected code (not just advice).
-Secret values in the code are replaced with {redacted}; never invent or repeat secret values, load them from environment variables in the fix.
-Respond as JSON: {{"is_real_risk": bool, "risk_reasoning": str, "explanation": str, "fixed_code": str}}"""
+Is this a real risk here, or a false alarm? A false alarm means no attacker or outside input can control it, or the value is a placeholder.
+Answer in JSON. "reason": at most 25 words. "fix": only the corrected line(s) of code, empty if it's a false alarm. Never repeat secret values; read them from environment variables."""
+
+# Field order matters: with the verdict first, small models answered before
+# reasoning and their verdicts contradicted their own reasons.
+ANSWER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reason": {"type": "string"},
+        "is_real_risk": {"type": "boolean"},
+        "fix": {"type": "string"},
+    },
+    "required": ["reason", "is_real_risk", "fix"],
+}
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -115,7 +130,7 @@ def pick_model() -> str:
     if override:
         return override
     installed = {m.model for m in _client().list().models}
-    for name in (PRIMARY_MODEL, FALLBACK_MODEL):
+    for name in (PRIMARY_MODEL, FALLBACK_MODEL, *OTHER_MODELS):
         if name in installed:
             return name
     raise RuntimeError(
@@ -128,11 +143,11 @@ def _chat(prompt: str) -> str:
     response = _client().chat(
         model=pick_model(),
         messages=[{"role": "user", "content": prompt}],
-        format="json",
+        format=ANSWER_SCHEMA,
         # otherwise ollama unloads the model after ~5 min idle and the next
         # commit waits for a multi-GB reload
         keep_alive=os.environ.get("VERICODE_KEEP_ALIVE", KEEP_ALIVE),
-        options={"temperature": 0},
+        options={"temperature": 0, "num_predict": MAX_ANSWER_TOKENS},
     )
     return response.message.content or ""
 
@@ -177,19 +192,23 @@ def parse_response(raw: str) -> dict:
         v = data.get(key)
         return None if v is None else str(v)
 
+    reason = text_or_none("reason") or text_or_none("risk_reasoning")
+    fix = text_or_none("fix") or text_or_none("fixed_code")
     return {
         "is_real_risk": _as_bool(data.get("is_real_risk")),
-        "risk_reasoning": text_or_none("risk_reasoning"),
-        "explanation": text_or_none("explanation"),
-        "fixed_code": text_or_none("fixed_code"),
+        "risk_reasoning": reason,
+        "explanation": text_or_none("explanation") or reason,
+        "fixed_code": fix or None,
     }
 
 
 def _enrich_one(finding: Finding) -> None:
+    facts = evidence.gather(finding)
     prompt = PROMPT_TEMPLATE.format(
         message=redact(finding.message),
         file=finding.file,
         line=finding.line,
+        evidence=f"Static analysis found: {redact(facts.text)}\n" if facts.text else "",
         code_context=redact(build_code_context(finding.file, finding.line)),
         redacted=REDACTED,
     )
@@ -209,7 +228,16 @@ def _enrich_one(finding: Finding) -> None:
     if finding.layer == "import_check" and finding.suggested_fix:
         finding.fixed_code = None
     if finding.is_real_risk is False:
-        finding.severity = "low"
+        if facts.supports_dismissal:
+            finding.severity = "low"
+        else:
+            # Small models sometimes call a real secret a false alarm; without
+            # static evidence backing that up, the finding keeps blocking.
+            finding.is_real_risk = None
+            finding.explanation = (
+                "The local AI thinks this may be a false alarm, but nothing in the code "
+                f"confirms it, so it still counts. AI's reason: {finding.risk_reasoning}"
+            )
 
 
 def enrich(findings: list[Finding]) -> list[Finding]:
