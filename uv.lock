@@ -1629,6 +1629,7 @@ dependencies = [
     { name = "ollama" },
     { name = "pre-commit" },
     { name = "pybetterleaks" },
+    { name = "pyyaml" },
     { name = "rich" },
     { name = "semgrep" },
 ]
@@ -1644,6 +1645,7 @@ requires-dist = [
     { name = "ollama" },
     { name = "pre-commit" },
     { name = "pybetterleaks", specifier = ">=0.6.2" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "rich" },
     { name = "semgrep" },
 ]

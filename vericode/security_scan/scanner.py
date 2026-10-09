@@ -14,19 +14,16 @@ from pathlib import Path
 from vericode.shared.finding import Finding, Severity
 
 DATA_DIR = Path(__file__).parent / "data"
-RULE_FILES = ("secrets.yml", "security-audit.yml", "system-call.yml")
 SEMGREP_TIMEOUT = 60
+MAX_BYTES = 1_000_000  # semgrep's own default cap
 
 
 @lru_cache(maxsize=None)
-def _rule_files() -> tuple[str, ...]:
-    paths = []
-    for name in RULE_FILES:
-        path = DATA_DIR / name
-        if not path.exists():
-            raise FileNotFoundError(f"{path} is missing. Run ./setup.sh (needs internet once).")
-        paths.append(str(path))
-    return tuple(paths)
+def _rule_file() -> str:
+    path = DATA_DIR / "rules.yml"
+    if not path.exists():
+        raise FileNotFoundError(f"{path} is missing. Run ./setup.sh (needs internet once).")
+    return str(path)
 
 
 def _skipped(scanner: str, reason: str) -> None:
@@ -44,8 +41,7 @@ def _semgrep(files: list[str]) -> list[Finding]:
     binary = shutil.which("semgrep")
     argv = [binary] if binary else [sys.executable, "-m", "semgrep"]
     argv += ["scan", "--json", "--metrics=off", "--disable-version-check", "--quiet"]
-    for rules in _rule_files():
-        argv += ["--config", rules]
+    argv += ["--config", _rule_file()]
 
     try:
         # semgrep exits 1 on findings, so check=True would be wrong
@@ -106,7 +102,15 @@ def run(staged_files: list[str]) -> list[Finding]:
     """Run semgrep --config <cached rules> --json against staged_files only,
     and map its output into Findings.
     """
-    files = [f for f in staged_files if Path(f).is_file()]
+    files = []
+    for file in staged_files:
+        path = Path(file)
+        if not path.is_file():
+            continue
+        if path.stat().st_size > MAX_BYTES:
+            _skipped(file, f"over {MAX_BYTES // 1000}kB")
+            continue
+        files.append(file)
     if not files:
         return []
 

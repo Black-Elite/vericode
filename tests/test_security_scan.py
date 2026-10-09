@@ -1,9 +1,9 @@
 import pytest
 
-from vericode.security_scan.scanner import DATA_DIR, run
+from vericode.security_scan.scanner import DATA_DIR, MAX_BYTES, run
 
 pytestmark = pytest.mark.skipif(
-    not (DATA_DIR / "secrets.yml").exists(),
+    not (DATA_DIR / "rules.yml").exists(),
     reason="Semgrep rules missing; run ./setup.sh",
 )
 
@@ -52,3 +52,14 @@ def test_binary_and_missing_files_do_not_crash(tmp_path):
     binary = tmp_path / "blob.bin"
     binary.write_bytes(b"\x00\xff\xfe")
     assert run([str(binary), str(tmp_path / "gone.py")]) == []
+
+
+def test_oversized_files_are_skipped(tmp_path):
+    big = tmp_path / "big.py"
+    big.write_text(f'TOKEN = "{SECRET}"\n' + "# pad\n" * MAX_BYTES)
+    assert run([str(big)]) == []
+
+
+def test_paths_with_spaces_are_scanned(tmp_path):
+    [finding] = scan(tmp_path, f'TOKEN = "{SECRET}"\n', name="my secrets.py")
+    assert finding.severity == "high"
