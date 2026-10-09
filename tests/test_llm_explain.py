@@ -41,16 +41,42 @@ def test_enrich_fills_fields(monkeypatch, sample):
     assert '> 2: KEY = "sk-123"' in prompts[0]  # context with marker
 
 
-def test_false_positive_downgraded_not_dropped(monkeypatch, sample):
-    monkeypatch.setattr(
-        explainer, "_chat",
-        lambda p: '{"is_real_risk": false, "risk_reasoning": "test fixture", '
-                  '"explanation": "Fake.", "fixed_code": ""}',
-    )
-    result = enrich([make_finding(sample)])
+DISMISS = '{"reason": "No outside input reaches it.", "is_real_risk": false, "fix": ""}'
+
+
+def test_false_positive_with_supporting_evidence_is_downgraded_not_dropped(monkeypatch, tmp_path):
+    src = tmp_path / "tools.py"
+    src.write_text("import subprocess\n\nsubprocess.run('git status', shell=True)\n")
+    monkeypatch.setattr(explainer, "_chat", lambda p: DISMISS)
+    result = enrich([make_finding(src, line=3)])
     assert len(result) == 1
     assert result[0].is_real_risk is False
     assert result[0].severity == "low"
+
+
+def test_ai_cannot_dismiss_a_real_looking_secret(monkeypatch, sample):
+    monkeypatch.setattr(explainer, "_chat", lambda p: DISMISS)
+    [f] = enrich([make_finding(sample)])
+    assert f.is_real_risk is None  # gate still treats it as real
+    assert f.severity == "high"
+    assert "still counts" in f.explanation
+
+
+def test_prompt_includes_static_evidence(monkeypatch, tmp_path):
+    src = tmp_path / "ping.py"
+    src.write_text("import os\nimport sys\n\nos.system('ping ' + sys.argv[1])\n")
+    prompts = []
+    monkeypatch.setattr(explainer, "_chat", lambda p: prompts.append(p) or GOOD)
+    enrich([make_finding(src, line=4)])
+    assert "Static analysis found: Outside input reaches this call" in prompts[0]
+    assert "sys.argv" in prompts[0]
+
+
+def test_reason_first_answer_is_parsed():
+    out = parse_response('{"reason": "user input", "is_real_risk": true, "fix": "subprocess.run([...])"}')
+    assert out["is_real_risk"] is True
+    assert out["risk_reasoning"] == out["explanation"] == "user input"
+    assert out["fixed_code"] == "subprocess.run([...])"
 
 
 def test_json_embedded_in_prose():
@@ -125,7 +151,7 @@ def test_empty_list():
     assert enrich([]) == []
 
 
-@pytest.mark.parametrize("raw, expected", [("30", 30.0), ("2.5", 2.5), ("slow", 10.0), ("0", 10.0)])
+@pytest.mark.parametrize("raw, expected", [("45", 45.0), ("2.5", 2.5), ("slow", 30.0), ("0", 30.0)])
 def test_timeout_setting(monkeypatch, raw, expected):
     monkeypatch.setenv("VERICODE_TIMEOUT", raw)
     assert explainer.timeout_seconds() == expected
@@ -219,15 +245,51 @@ def test_secret_never_reaches_prompt_or_output(monkeypatch, tmp_path):
     assert r.is_real_risk is True  # verdict still set
 
 
-def test_import_check_suggestion_not_overridden(monkeypatch, tmp_path):
+def import_finding(tmp_path):
     src = tmp_path / "a.py"
     src.write_text("import markdown_pdf_x\n")
-    monkeypatch.setattr(explainer, "_chat", lambda p: GOOD)
-    f = Finding(
+    return Finding(
         layer="import_check", file=str(src), line=1, severity="high",
         message="package does not exist", suggested_fix="Did you mean markdown-pdf?",
     )
-    [r] = enrich([f])
+
+
+def test_import_findings_are_not_sent_to_the_ai(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(explainer, "_chat", lambda p: calls.append(p) or GOOD)
+    [r] = enrich([import_finding(tmp_path)])
+    assert calls == []
     assert r.suggested_fix == "Did you mean markdown-pdf?"
     assert r.fixed_code is None
-    assert r.is_real_risk is True
+    assert r.is_real_risk is None  # gate still blocks a high import finding
+    assert r.severity == "high"
+
+
+def test_import_findings_do_not_use_up_the_ai_limit(monkeypatch, tmp_path, sample):
+    monkeypatch.setenv("VERICODE_MAX_AI_FINDINGS", "1")
+    calls = []
+    monkeypatch.setattr(explainer, "_chat", lambda p: calls.append(p) or GOOD)
+    [imp, secret] = enrich([import_finding(tmp_path), make_finding(sample)])
+    assert len(calls) == 1
+    assert secret.is_real_risk is True
+    assert imp.is_real_risk is None
+
+
+def test_fixed_instructions_come_before_the_finding(monkeypatch, sample):
+    prompts = []
+    monkeypatch.setattr(explainer, "_chat", lambda p: prompts.append(p) or GOOD)
+    enrich([make_finding(sample)])
+    # identical prefix on every call lets Ollama reuse its work
+    assert prompts[0].startswith(explainer.PROMPT_PREFIX)
+    finding_part = prompts[0][len(explainer.PROMPT_PREFIX):]
+    assert finding_part.startswith("A security scanner flagged line 2")
+    assert "hardcoded API key" in finding_part
+
+
+def test_context_is_three_lines_either_side(tmp_path):
+    src = tmp_path / "long.py"
+    src.write_text("".join(f"x{i} = {i}\n" for i in range(1, 21)))
+    ctx = explainer.build_code_context(str(src), 10)
+    assert "> 10: x10 = 10" in ctx
+    assert " 7: x7" in ctx and " 13: x13" in ctx
+    assert " 6: x6" not in ctx and " 14: x14" not in ctx

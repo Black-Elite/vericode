@@ -10,14 +10,13 @@ if ! command -v uv &> /dev/null; then
 fi
 uv sync --dev
 
-echo "== Pulling local LLM (Ollama, Qwen2.5-Coder 7B) =="
+echo "== Pulling local LLM (Ollama, Qwen2.5-Coder 1.5B, runs on CPU) =="
 if ! command -v ollama &> /dev/null; then
   echo "Ollama not found. Install it from https://ollama.com before continuing."
   exit 1
 fi
-ollama pull qwen2.5-coder:7b
-# Fallback for slower hardware — uncomment if needed:
-# ollama pull qwen2.5-coder:3b
+ollama pull qwen2.5-coder:1.5b
+# Optional, for machines with a GPU: ollama pull qwen2.5-coder:7b
 
 echo "== Caching Semgrep offline rulesets =="
 # --dryrun caches nothing, so fetch the rules as files
