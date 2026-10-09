@@ -20,7 +20,10 @@ ollama pull qwen2.5-coder:7b
 # ollama pull qwen2.5-coder:3b
 
 echo "== Caching Semgrep offline rulesets =="
-uv run semgrep --config p/secrets --config p/python --dryrun --metrics=off .
+# --dryrun caches nothing; fetch the rules as files so commit-time stays offline.
+mkdir -p vericode/security_scan/data
+curl -fsSL -o vericode/security_scan/data/secrets.yml https://semgrep.dev/c/p/secrets
+curl -fsSL -o vericode/security_scan/data/python.yml https://semgrep.dev/c/p/python
 
 echo "== Building offline PyPI package name snapshot =="
 uv run python scripts/build_pypi_snapshot.py

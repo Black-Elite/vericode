@@ -5,6 +5,7 @@ venv/
 *.egg-info/
 .pytest_cache/
 vericode/import_check/data/
+vericode/security_scan/data/
 .semgrep/
 CLAUDE.local.md
 .DS_Store
