@@ -5,6 +5,7 @@ folder for the full spec.
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -12,25 +13,42 @@ import time
 
 from rich import box
 from rich.console import Console
+from rich.markup import escape
+from rich.padding import Padding
 from rich.table import Table
+from rich.text import Text
 
+from vericode.gate.ui import header, override_hint, render_error, robot_banner, use_ascii
 from vericode.import_check.checker import run as run_import_check
-from vericode.security_scan.scanner import run as run_security_scan
 from vericode.llm_explain.explainer import enrich
+from vericode.security_scan.scanner import run as run_security_scan
 from vericode.shared.finding import Finding
-
-console = Console(highlight=False)
 
 SEVERITY_STYLE = {"high": "bold red", "medium": "yellow", "low": "dim"}
 LAYER_LABEL = {"import_check": "import", "security_scan": "security", "llm_explain": "ai"}
+_SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
+_PATCH_LINE_LIMIT = 12
+
+
+def _console() -> Console:
+    """Markup stays on so severity colors work. Created after use_ascii()."""
+    return Console(highlight=False)
+
+
+def _git_text(args: list[str]) -> str:
+    out = subprocess.run(
+        args,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+    return out.stdout or ""
 
 
 def get_staged_files() -> list[str]:
-    out = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, check=True,
-    )
-    return [line for line in out.stdout.splitlines() if line]
+    text = _git_text(["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"])
+    return [line for line in text.splitlines() if line]
 
 
 def parse_added_lines(diff: str) -> dict[str, set[int]]:
@@ -49,85 +67,166 @@ def parse_added_lines(diff: str) -> dict[str, set[int]]:
 
 def added_lines() -> dict[str, set[int]]:
     """Line numbers this commit actually adds, per file."""
-    out = subprocess.run(
-        ["git", "diff", "--cached", "-U0", "--diff-filter=ACM"],
-        capture_output=True, text=True, check=True,
+    text = _git_text(["git", "diff", "--cached", "-U0", "--diff-filter=ACM"])
+    return parse_added_lines(text)
+
+
+def _row_table(ascii_mode: bool, show_header: bool) -> Table:
+    table = Table(
+        box=box.ASCII if ascii_mode else box.SIMPLE_HEAD,
+        pad_edge=False,
+        show_edge=False,
+        show_header=show_header,
+        expand=False,
     )
-    return parse_added_lines(out.stdout)
+    table.add_column("Line", justify="right", style="cyan", no_wrap=True, min_width=4)
+    table.add_column("Severity", no_wrap=True, min_width=9)
+    table.add_column("Check", style="dim", no_wrap=True, min_width=8)
+    return table
 
 
-def render_report(findings: list[Finding]) -> None:
-    # Only show the AI column when the model actually answered for something;
-    # otherwise every row repeats the same "unavailable" notice.
-    reviewed = any(f.is_real_risk is not None for f in findings)
+def _row_ai(finding: Finding) -> str | None:
+    """AI text that belongs on this row. Skip-notes stay in the footer."""
+    if finding.is_real_risk is None:
+        return finding.risk_reasoning or None
+    return finding.explanation or finding.risk_reasoning or None
+
+
+def _print_patch(console: Console, fixed_code: str) -> None:
+    lines = fixed_code.splitlines() or [""]
+    for line in lines[:_PATCH_LINE_LIMIT]:
+        console.print(Padding(Text(line, style="green"), (0, 0, 0, 4)))
+    if len(lines) > _PATCH_LINE_LIMIT:
+        console.print(Padding(Text("... (truncated)", style="dim"), (0, 0, 0, 4)))
+
+
+def _print_details(console: Console, finding: Finding) -> None:
+    """Issue, optional Local AI, and Fix, indented to the full console width."""
+    if finding.message:
+        console.print(Padding(Text(finding.message), (0, 0, 0, 2)))
+    ai_text = _row_ai(finding)
+    if ai_text:
+        ai = Text()
+        ai.append("Local AI: ", style="dim")
+        ai.append(ai_text)
+        console.print(Padding(ai, (0, 0, 0, 2)))
+    suggested = finding.suggested_fix or ""
+    patch = finding.fixed_code or ""
+    if not suggested and not patch:
+        return
+    fix = Text("Fix:", style="dim")
+    if suggested:
+        fix.append(" ")
+        fix.append(suggested)
+    console.print(Padding(fix, (0, 0, 0, 2)))
+    if patch:
+        _print_patch(console, patch)
+
+
+def render_report(findings: list[Finding], ascii_mode: bool = False) -> None:
+    console = _console()
 
     for file in dict.fromkeys(f.file for f in findings):
-        console.print(f"\n[bold underline]{file}[/]")
-        table = Table(box=box.SIMPLE_HEAD, pad_edge=False, show_edge=False)
-        table.add_column("Line", justify="right", style="cyan", no_wrap=True)
-        table.add_column("Severity", no_wrap=True)
-        table.add_column("Check", style="dim", no_wrap=True)
-        table.add_column("Issue", ratio=3)
-        if reviewed:
-            table.add_column("Local AI", ratio=2)
-        table.add_column("Fix", ratio=2, style="green")
-
-        for f in (x for x in findings if x.file == file):
-            severity = f"[{SEVERITY_STYLE.get(f.severity, '')}]{f.severity}[/]"
-            if f.is_real_risk is False:
+        console.print(f"\n[bold underline]{escape(file)}[/]")
+        rows = [item for item in findings if item.file == file]
+        rows.sort(key=lambda item: (_SEVERITY_RANK.get(item.severity, 9), item.line))
+        for index, finding in enumerate(rows):
+            table = _row_table(ascii_mode, show_header=index == 0)
+            severity = f"[{SEVERITY_STYLE.get(finding.severity, '')}]{finding.severity}[/]"
+            if finding.is_real_risk is False:
                 severity += "\n[dim]dismissed[/]"
-            row = [
-                str(f.line),
+            table.add_row(
+                str(finding.line),
                 severity,
-                LAYER_LABEL.get(f.layer, f.layer),
-                f.message,
-            ]
-            if reviewed:
-                row.append(f.explanation or f.risk_reasoning or "[dim]—[/]"
-                           if f.is_real_risk is not None else "[dim]—[/]")
-            row.append(f.fixed_code or f.suggested_fix or "")
-            table.add_row(*row)
-        console.print(table)
+                LAYER_LABEL.get(finding.layer, finding.layer),
+            )
+            console.print(table)
+            _print_details(console, finding)
 
-    skipped = {f.explanation for f in findings
-               if f.is_real_risk is None and f.explanation}
-    for note in sorted(skipped):
-        console.print(f"[dim]{note}[/]")
+    skipped = {
+        finding.explanation
+        for finding in findings
+        if finding.is_real_risk is None and finding.explanation
+    }
+    for note in sorted(note for note in skipped if note):
+        console.print(f"[dim]{escape(note)}[/]")
 
 
-def main() -> int:
+def _missing_file_message(exc: FileNotFoundError) -> tuple[str, str]:
+    text = f"{exc.filename or ''} {exc}"
+    if "pypi_all.txt" in text or "pypi_top.txt" in text:
+        return "Offline package list not found.", "Run ./setup.sh while online first."
+    name = exc.filename or str(exc)
+    return f"File not found: {name}", ""
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="vericode")
+    parser.add_argument("--ascii", action="store_true")
+    parser.add_argument("--banner", action="store_true")
+    args, _unknown = parser.parse_known_args(argv)
+    # Before the banner, the report, and the header. Nothing has been printed yet.
+    ascii_mode = use_ascii(args.ascii)
+
     started = time.perf_counter()
-    staged = get_staged_files()
-    findings = run_import_check(staged) + run_security_scan(staged)
+    try:
+        staged = get_staged_files()
+        added = added_lines()
+    except subprocess.CalledProcessError:
+        render_error(
+            "Not a git repository or git failed.",
+            "Run Vericode from inside a git repository.",
+            ascii_mode,
+        )
+        return 2
 
-    # only judge what this commit adds, not what the file already contained
-    added = added_lines()
-    findings = [f for f in findings if f.line in added.get(f.file, ())]
+    try:
+        findings = run_import_check(staged) + run_security_scan(staged)
+        findings = [finding for finding in findings if finding.line in added.get(finding.file, ())]
+        enrich([finding for finding in findings if finding.severity in ("high", "medium")])
+    except FileNotFoundError as exc:
+        title, body = _missing_file_message(exc)
+        render_error(title, body, ascii_mode)
+        return 2
 
-    enrich([f for f in findings if f.severity in ("high", "medium")])
+    blocking = [
+        finding
+        for finding in findings
+        if finding.severity == "high" and finding.is_real_risk is not False
+    ]
+    override = bool(blocking) and os.environ.get("VERICODE_OVERRIDE") == "1"
+    blocked = bool(blocking) and not override
 
+    if args.banner or blocked:
+        robot_banner(ascii_mode)
     if findings:
-        render_report(findings)
+        render_report(findings, ascii_mode)
+
     elapsed = time.perf_counter() - started
-    console.print(
+    if blocked:
+        status = "blocked"
+    elif findings:
+        status = "warning"
+    else:
+        status = "passed"
+    header(status, ascii_mode)
+    _console().print(
         f"[dim]Vericode: {len(staged)} staged file(s), "
         f"{len(findings)} finding(s), {elapsed:.1f}s[/dim]"
     )
 
-    blocking = [f for f in findings if f.severity == "high" and f.is_real_risk is not False]
     if not blocking:
         return 0
-
-    if os.environ.get("VERICODE_OVERRIDE") == "1":
-        console.print(
+    if override:
+        _console().print(
             f"[bold yellow]OVERRIDE: committing past {len(blocking)} high-severity "
             f"issue(s) because VERICODE_OVERRIDE=1.[/bold yellow]"
         )
         return 0
 
-    console.print(
+    _console().print(
         f"[bold red]Blocked: {len(blocking)} high-severity issue(s).[/bold red] "
-        f"Fix them, or commit anyway with VERICODE_OVERRIDE=1 git commit ..."
+        f"Fix them, or commit anyway with {escape(override_hint())}"
     )
     return 1
 
