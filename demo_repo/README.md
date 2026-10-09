@@ -8,9 +8,9 @@ The source files are stored as `.tmpl` so Vericode's own hook and GitHub never s
 
 | Step | Command | What happens |
 |---|---|---|
-| 1 | `./demo_repo/demo.sh reset`, then in `~/vericode-demo`: `git commit -m "Add PDF export and Slack reminders"` | **Blocked.** Fake import `markdown_pdf_export` (high), obscure package `slack_notify` (medium, possible slopsquat), hardcoded Slack token (high), each explained by the local AI |
+| 1 | `./demo_repo/demo.sh reset`, then in `~/vericode-demo`: `git commit -m "Add PDF export and Slack reminders"` | **Blocked.** Fake import `markdown_pdf_export` (high, "Did you mean 'markdown-pdf'?") and obscure package `slack_notify` (medium, possible slopsquat), both from Layer 1 without the AI; hardcoded Slack token (high), where the local AI says "real risk" and writes `SLACK_TOKEN = os.environ['SLACK_TOKEN']` |
 | 2 | `./demo_repo/demo.sh fix`, then commit again | **Passes.** Real package, token read from the environment |
-| 3 | `./demo_repo/demo.sh act2`, then `git commit -m "Add backup and server check"` | Two findings with the **same rule and severity**. The AI should mark `tools.py` (user input reaches `os.system`) as real and `backup.py` (only today's date) as a false alarm |
+| 3 | `./demo_repo/demo.sh act2`, then `git commit -m "Add backup and server check"` | Two findings with the **same rule and severity**. The local AI marks `backup.py` as a false alarm (only today's date reaches `os.system`; "Fix: none needed") and `tools.py` as a real risk (command-line input), with fix `subprocess.run(['ping', '-c', '1', host], check=True)`. Only `tools.py` blocks |
 | 4 | Turn wifi off and repeat step 1 | Still works |
 
 To show the override instead of the fix in step 2: `VERICODE_OVERRIDE=1 git commit -m "..."`.
