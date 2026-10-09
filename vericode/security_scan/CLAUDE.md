@@ -10,9 +10,11 @@ using Semgrep's offline rulesets.
 ## Build steps
 
 1. `pip install semgrep`.
-2. During setup (`setup.sh`, needs internet once): cache
-   `semgrep --config p/secrets --config p/python` rulesets locally. Confirm a
-   re-run works with networking disabled.
+2. During setup (`setup.sh`, needs internet once): download the rulesets as
+   YAML into `data/`. `--dryrun` caches nothing, so the files are fetched from
+   `semgrep.dev/c/...`. `p/python` is not used — its injection rules only fire
+   on django/flask taint sources and miss plain `eval` / `os.system`; it's
+   replaced by `p/security-audit` plus the `dangerous-system-call` rule.
 3. Wrap the CLI: `semgrep scan --config <cached-path> --json <staged files>`,
    scoped to staged files only.
 4. Parse Semgrep's JSON output into `Finding` objects (import from
@@ -30,3 +32,9 @@ using Semgrep's offline rulesets.
 - Semgrep has ~1-2s startup overhead — fine for commit-time, mention it if
   asked about speed.
 - Always scope `--include` to the staged file list, not the whole repo.
+- Semgrep exits 1 when it finds something, so `check=True` is wrong.
+- Betterleaks runs via `pybetterleaks` (wheels, no binary to install). Its line
+  numbers start at 0 *and* the 0 is omitted, so `(line or 0) + 1`. Always pass
+  `validation=False` — validation uploads the secret to vendor APIs.
+- Secret values never enter a `Finding`. `leak.secret` and semgrep's
+  `extra["lines"]` both hold raw credentials; `file:line` is enough.
