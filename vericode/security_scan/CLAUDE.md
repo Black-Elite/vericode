@@ -5,7 +5,18 @@ Owner: Person B or C · No custom AI, wraps Semgrep. You own this folder only.
 ## Goal
 
 Flag hardcoded secrets, injection risks, and unsafe `eval`/`exec`/shell use,
-using Semgrep's offline rulesets.
+offline.
+
+Three scanners, in order of cost:
+
+- **betterleaks** (`pybetterleaks`) — secrets. ~9ms/file.
+- **stdlib `ast`** — `eval`, `exec`, `os.system`, `subprocess(shell=True)`.
+  Sub-millisecond. A literal argument is `medium`, anything else is `high`.
+- **Semgrep** — the remaining 134 rules. **Opt-in via `VERICODE_SEMGREP=1`**,
+  because it costs ~3s per run against ~50ms for the other two, and ~1.8s of
+  that is a fixed floor no amount of rule pruning gets under.
+
+Findings are deduped on `(file, line)`; betterleaks wins, then ast, then semgrep.
 
 ## Build steps
 

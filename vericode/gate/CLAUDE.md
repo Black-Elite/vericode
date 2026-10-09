@@ -16,6 +16,9 @@ hook with a clear terminal report and a block/override gate.
 3. Call `import_check.run(staged_files)` → `security_scan.run(staged_files)`
    → collect all Findings → send high/medium ones to
    `llm_explain.enrich(findings)` → merge back.
+   Findings are filtered to lines this commit actually adds (`added_lines()`,
+   from `git diff --cached -U0`), so nobody is blocked by a problem that was
+   already in a file they merely touched. This applies to every layer.
 4. Render with Rich: a table per file — line, severity, message, explanation,
    suggested/fixed code.
 5. Gate logic: any `high` severity Finding → exit code 1, unless
