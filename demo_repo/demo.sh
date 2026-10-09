@@ -3,6 +3,7 @@
 #   ./demo_repo/demo.sh reset   fresh repo with the hook installed; stages act 1 (should be blocked)
 #   ./demo_repo/demo.sh fix     stages the fixed export.py and notify.py (should pass)
 #   ./demo_repo/demo.sh act2    stages backup.py and tools.py (AI tells the real risk from the false alarm)
+#   ./demo_repo/demo.sh warm    loads the local AI again (run right before going on stage)
 # Repo location: $DEMO_DIR, default ~/vericode-demo.
 set -euo pipefail
 
@@ -24,6 +25,23 @@ import secrets, string
 alnum = string.ascii_letters + string.digits
 print(f"xoxb-{secrets.randbelow(10**11):011d}-{secrets.randbelow(10**12):012d}-"
       + "".join(secrets.choice(alnum) for _ in range(24)))'
+}
+
+# Loads the model and caches the fixed prompt text in Ollama, so the first
+# commit on stage isn't the slow one. Never fails the script.
+warm() {
+  echo "Warming up the local AI..."
+  local start model
+  start=$(date +%s)
+  if model=$(uv run --project "$VERICODE" python -c '
+from vericode.llm_explain.explainer import warm_up
+model = warm_up()
+print(model or "")
+raise SystemExit(0 if model else 1)'); then
+    echo "Local AI ready: $model ($(( $(date +%s) - start ))s)."
+  else
+    echo "Local AI not reachable. Is Ollama running? Commits will show the static checks only." >&2
+  fi
 }
 
 require_demo_repo() {
@@ -67,6 +85,7 @@ EOF
   copy_templates act1
   sed -i "s/__SLACK_TOKEN__/$(fake_slack_token)/" notify.py
   git add export.py notify.py
+  warm
   echo "Demo repo ready at $DEMO_DIR with export.py and notify.py staged."
   echo "Next: cd $DEMO_DIR && git commit -m \"Add PDF export and Slack reminders\"   (should be blocked)"
 }
@@ -91,5 +110,6 @@ case "${1:-}" in
   reset) reset ;;
   fix) fix ;;
   act2) act2 ;;
-  *) echo "Usage: $0 reset|fix|act2" >&2; exit 1 ;;
+  warm) warm ;;
+  *) echo "Usage: $0 reset|fix|act2|warm" >&2; exit 1 ;;
 esac
