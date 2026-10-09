@@ -452,6 +452,7 @@ def test_markup_in_findings_prints_literally(capsys, monkeypatch):
         severity="low",
         message="note row",
         explanation=f"note {MARKUP_TEXT}",
+        suggested_fix=f"fix {MARKUP_TEXT}",
         is_real_risk=None,
     )
     render_report([reviewed, reasoned, noted])
@@ -463,6 +464,51 @@ def test_markup_in_findings_prints_literally(capsys, monkeypatch):
     assert f"risk {MARKUP_TEXT}" in output
     assert f"fix {MARKUP_TEXT}" in output
     assert f"note {MARKUP_TEXT}" in output
+
+
+def _render(capsys, monkeypatch, findings):
+    from rich.console import Console
+
+    monkeypatch.setattr(
+        "vericode.gate.cli._console",
+        lambda: Console(highlight=False, width=240, height=40, legacy_windows=False),
+    )
+    render_report(findings)
+    return capsys.readouterr().out
+
+
+def test_ai_verdict_is_shown_in_words(capsys, monkeypatch):
+    real = Finding(layer="security_scan", file="a.py", line=1, severity="high",
+                   message="os.system", explanation="user input reaches the shell", is_real_risk=True)
+    cleared = Finding(layer="security_scan", file="a.py", line=2, severity="low",
+                      message="os.system", explanation="only today's date", is_real_risk=False)
+    output = _render(capsys, monkeypatch, [real, cleared])
+    assert "Local AI (real risk): user input reaches the shell" in output
+    assert "Local AI (false alarm): only today's date" in output
+
+
+def test_cleared_finding_shows_no_fix(capsys, monkeypatch):
+    cleared = Finding(layer="security_scan", file="a.py", line=2, severity="low",
+                      message="os.system", explanation="only today's date", is_real_risk=False,
+                      suggested_fix="Replace os.system()", fixed_code="subprocess.run([...])")
+    output = _render(capsys, monkeypatch, [cleared])
+    assert "Fix: none needed" in output
+    assert "Replace os.system()" not in output
+    assert "subprocess.run" not in output
+
+
+def test_blocked_banner_frowns(capsys, monkeypatch):
+    from rich.console import Console
+
+    from vericode.gate import ui
+
+    monkeypatch.setattr(ui, "_console", lambda: Console(width=80, legacy_windows=False))
+    ui.robot_banner(ascii_mode=True, status="blocked")
+    blocked = capsys.readouterr().out
+    ui.robot_banner(ascii_mode=True)
+    idle = capsys.readouterr().out
+    assert "x  x" in blocked and "o  o" not in blocked
+    assert "o  o" in idle
 
 
 def test_ascii_report_is_7bit(capsys):

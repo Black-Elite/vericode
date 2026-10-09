@@ -85,6 +85,9 @@ def _row_table(ascii_mode: bool, show_header: bool) -> Table:
     return table
 
 
+_AI_VERDICT = {True: ("real risk", "bold red"), False: ("false alarm", "green")}
+
+
 def _row_ai(finding: Finding) -> str | None:
     """AI text that belongs on this row. Skip-notes stay in the footer."""
     if finding.is_real_risk is None:
@@ -107,9 +110,17 @@ def _print_details(console: Console, finding: Finding) -> None:
     ai_text = _row_ai(finding)
     if ai_text:
         ai = Text()
-        ai.append("Local AI: ", style="dim")
+        ai.append("Local AI", style="dim")
+        verdict = _AI_VERDICT.get(finding.is_real_risk)
+        if verdict:
+            ai.append(f" ({verdict[0]})", style=verdict[1])
+        ai.append(": ", style="dim")
         ai.append(ai_text)
         console.print(Padding(ai, (0, 0, 0, 2)))
+    if finding.is_real_risk is False:
+        # a cleared finding needs no fix; the scanner's generic advice would contradict the verdict
+        console.print(Padding(Text("Fix: none needed", style="dim"), (0, 0, 0, 2)))
+        return
     suggested = finding.suggested_fix or ""
     patch = finding.fixed_code or ""
     if not suggested and not patch:
@@ -198,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     blocked = bool(blocking) and not override
 
     if args.banner or blocked:
-        robot_banner(ascii_mode)
+        robot_banner(ascii_mode, "blocked" if blocked else "idle")
     if findings:
         render_report(findings, ascii_mode)
 
