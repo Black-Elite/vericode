@@ -142,3 +142,35 @@ def test_client_uses_timeout_setting(monkeypatch):
     monkeypatch.setattr(explainer.ollama, "Client", FakeClient)
     explainer._client()
     assert seen["timeout"] == 45.0
+
+
+def test_only_most_severe_findings_go_to_the_ai(monkeypatch, sample):
+    calls = []
+    monkeypatch.delenv("VERICODE_MAX_AI_FINDINGS", raising=False)
+    monkeypatch.setattr(explainer, "_chat", lambda p: calls.append(p) or GOOD)
+    findings = [
+        make_finding(sample, severity=s) for s in ("low", "high", "medium", "high", "medium")
+    ]
+    result = enrich(findings)
+
+    assert len(calls) == 3
+    assert result == findings  # original order kept
+    reviewed = [f for f in result if f.is_real_risk is not None]
+    assert sorted(f.severity for f in reviewed) == ["high", "high", "medium"]
+    skipped = [f for f in result if f.is_real_risk is None]
+    assert all("Not reviewed by the local AI" in f.explanation for f in skipped)
+
+
+def test_unreviewed_high_finding_still_blocks(monkeypatch, sample):
+    monkeypatch.setenv("VERICODE_MAX_AI_FINDINGS", "1")
+    monkeypatch.setattr(explainer, "_chat", lambda p: GOOD)
+    [first, second] = enrich([make_finding(sample), make_finding(sample)])
+    assert first.is_real_risk is True
+    assert second.is_real_risk is None  # gate treats None as real
+    assert second.severity == "high"
+
+
+@pytest.mark.parametrize("raw, expected", [("5", 5), ("abc", 3), ("0", 3), ("-2", 3)])
+def test_max_ai_findings_setting(monkeypatch, raw, expected):
+    monkeypatch.setenv("VERICODE_MAX_AI_FINDINGS", raw)
+    assert explainer.max_ai_findings() == expected
