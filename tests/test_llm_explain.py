@@ -293,3 +293,35 @@ def test_context_is_three_lines_either_side(tmp_path):
     assert "> 10: x10 = 10" in ctx
     assert " 7: x7" in ctx and " 13: x13" in ctx
     assert " 6: x6" not in ctx and " 14: x14" not in ctx
+
+
+def test_warm_up_caches_the_fixed_prompt_and_loads_the_model(monkeypatch):
+    calls = []
+
+    class FakeClient:
+        def chat(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setenv("VERICODE_MODEL", "qwen2.5-coder:1.5b")
+    explainer.pick_model.cache_clear()
+    monkeypatch.setattr(explainer, "_client", lambda: FakeClient())
+    assert explainer.warm_up() == "qwen2.5-coder:1.5b"
+    [call] = calls
+    assert call["messages"][0]["content"].startswith(explainer.PROMPT_PREFIX)
+    assert call["options"]["num_predict"] == 1
+    explainer.pick_model.cache_clear()
+
+
+def test_warm_up_never_raises_when_ollama_is_down(monkeypatch):
+    class DownClient:
+        def chat(self, **kwargs):
+            raise ConnectionError("refused")
+
+        def list(self):
+            raise ConnectionError("refused")
+
+    monkeypatch.delenv("VERICODE_MODEL", raising=False)
+    explainer.pick_model.cache_clear()
+    monkeypatch.setattr(explainer, "_client", lambda: DownClient())
+    assert explainer.warm_up() is None
+    explainer.pick_model.cache_clear()
