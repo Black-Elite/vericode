@@ -11,7 +11,8 @@ The source files are stored as `.tmpl` so Vericode's own hook and GitHub never s
 | 1 | `./demo_repo/demo.sh reset`, then in `~/vericode-demo`: `git commit -m "Add PDF export and Slack reminders"` | **Blocked.** Fake import `markdown_pdf_export` (high, "Did you mean 'markdown-pdf'?") and obscure package `slack_notify` (medium, possible slopsquat), both from Layer 1 without the AI; hardcoded Slack token (high), where the local AI says "real risk" and writes `SLACK_TOKEN = os.environ['SLACK_TOKEN']` |
 | 2 | `./demo_repo/demo.sh fix`, then commit again | **Passes.** Real package, token read from the environment |
 | 3 | `./demo_repo/demo.sh act2`, then `git commit -m "Add backup and server check"` | Two findings with the **same rule and severity**. The local AI marks `backup.py` as a false alarm (only today's date reaches `os.system`; "Fix: none needed") and `tools.py` as a real risk (command-line input), with fix `subprocess.run(['ping', '-c', '1', host], check=True)`. Only `tools.py` blocks |
-| 4 | Turn wifi off and repeat step 1 | Still works |
+| 4 | `./demo_repo/demo.sh act3`, then `git commit -m "Add delete endpoint and reminders"` | **Blocked.** The consistency layer compares the new `delete_note` with the four handlers already in `notes_api.py`: "4 of 4 similar @route handlers call check_owner() before acting; delete_note doesn't". The local AI says "real risk: any user can delete anyone's note"; fix `check_owner(note, user)`. `reminders.py`'s `due_label` is flagged as a copy of `format_due` (low). About 4–9s |
+| 5 | Turn wifi off and repeat step 1 | Still works |
 
 To show the override instead of the fix in step 2: `VERICODE_OVERRIDE=1 git commit -m "..."`.
 
