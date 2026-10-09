@@ -89,6 +89,21 @@ _ASCII_BANNER = (
     "+------+",
 )
 
+# Same head, but the face matches a blocked commit (like the header's ✖_✖).
+_UNICODE_BANNER_BLOCKED = (
+    "┌──────┐",
+    "│ ✖  ✖ │",
+    "│  ︵  │",
+    "└──────┘",
+)
+
+_ASCII_BANNER_BLOCKED = (
+    "+------+",
+    "| x  x |",
+    "|  ^   |",
+    "+------+",
+)
+
 
 def _console() -> Console:
     """Build a console at call time. Never cached, never forced into color."""
@@ -227,9 +242,12 @@ def header(status: str, ascii_mode: bool) -> None:
     _console().print(line)
 
 
-def robot_banner(ascii_mode: bool) -> None:
-    """Small robot head. At most five lines."""
-    art = _ASCII_BANNER if ascii_mode else _UNICODE_BANNER
+def robot_banner(ascii_mode: bool, status: str = "idle") -> None:
+    """Small robot head. At most five lines. Frowns when the commit is blocked."""
+    if status == "blocked":
+        art = _ASCII_BANNER_BLOCKED if ascii_mode else _UNICODE_BANNER_BLOCKED
+    else:
+        art = _ASCII_BANNER if ascii_mode else _UNICODE_BANNER
     console = _console()
     for row in art:
         console.print(Text(row, style="teal"))
