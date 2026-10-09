@@ -29,9 +29,45 @@ Code (with surrounding context):
 {code_context}
 
 Decide if this is a real risk given the context, or a false positive. Then explain why in 2-3 plain-English sentences, and write the corrected code (not just advice).
+Secret values in the code are replaced with {redacted}; never invent or repeat secret values, load them from environment variables in the fix.
 Respond as JSON: {{"is_real_risk": bool, "risk_reasoning": str, "explanation": str, "fixed_code": str}}"""
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
+
+REDACTED = "<REDACTED>"
+# Well-known token shapes, redacted wherever they appear.
+_TOKEN_PATTERNS = [
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+    re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{8,}"),            # Slack
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),                      # AWS access key id
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),               # GitHub
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}"),                    # OpenAI-style
+    re.compile(r"\bAIza[0-9A-Za-z_-]{30,}"),                   # Google API key
+    re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{16,}"),   # auth headers
+]
+# name = "value" where the name looks secret-ish: keep the name, blank the value.
+_SECRET_ASSIGNMENT = re.compile(
+    r"""(?ix)
+    ([\w.-]*(?:secret|token|passw(?:or)?d|pwd|api[_-]?key|auth|credential|private[_-]?key)[\w.-]*
+    ["']?\s*[:=]\s*)
+    (["'])([^"'\n]{4,})\2
+    """
+)
+
+
+def redact(text: str) -> str:
+    """Blank secret values so they never reach the model or the report."""
+    for pattern in _TOKEN_PATTERNS:
+        text = pattern.sub(
+            lambda m: (m.group(1) + REDACTED) if m.groups() else REDACTED, text
+        )
+
+    def blank(m: re.Match) -> str:
+        if m.group(3) == REDACTED:
+            return m.group(0)
+        return f"{m.group(1)}{m.group(2)}{REDACTED}{m.group(2)}"
+
+    return _SECRET_ASSIGNMENT.sub(blank, text)
 
 
 def build_code_context(file: str, line: int, radius: int = CONTEXT_LINES) -> str:
@@ -147,10 +183,11 @@ def parse_response(raw: str) -> dict:
 
 def _enrich_one(finding: Finding) -> None:
     prompt = PROMPT_TEMPLATE.format(
-        message=finding.message,
+        message=redact(finding.message),
         file=finding.file,
         line=finding.line,
-        code_context=build_code_context(finding.file, finding.line),
+        code_context=redact(build_code_context(finding.file, finding.line)),
+        redacted=REDACTED,
     )
     try:
         fields = parse_response(_chat(prompt))
@@ -158,10 +195,15 @@ def _enrich_one(finding: Finding) -> None:
         finding.explanation = f"LLM unavailable, showing static check only ({type(exc).__name__}: {exc})"
         return
 
-    finding.is_real_risk = fields["is_real_risk"]
-    finding.risk_reasoning = fields["risk_reasoning"]
-    finding.explanation = fields["explanation"]
-    finding.fixed_code = fields["fixed_code"]
+    # Redact again on the way out: the model may echo or hallucinate a secret.
+    clean = {k: (redact(v) if isinstance(v, str) else v) for k, v in fields.items()}
+    finding.is_real_risk = clean["is_real_risk"]
+    finding.risk_reasoning = clean["risk_reasoning"]
+    finding.explanation = clean["explanation"]
+    finding.fixed_code = clean["fixed_code"]
+    # Layer 1's "Did you mean X?" beats a model-written import fix; keep it visible.
+    if finding.layer == "import_check" and finding.suggested_fix:
+        finding.fixed_code = None
     if finding.is_real_risk is False:
         finding.severity = "low"
 

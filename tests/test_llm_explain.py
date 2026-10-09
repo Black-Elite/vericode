@@ -174,3 +174,60 @@ def test_unreviewed_high_finding_still_blocks(monkeypatch, sample):
 def test_max_ai_findings_setting(monkeypatch, raw, expected):
     monkeypatch.setenv("VERICODE_MAX_AI_FINDINGS", raw)
     assert explainer.max_ai_findings() == expected
+
+
+SLACK = "xoxb-1234567890-abcdefghijkl"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f'SLACK_TOKEN = "{SLACK}"',
+        f"client = WebClient('{SLACK}')",
+        'password = "hunter2hunter2"',
+        'headers = {"Authorization": "Bearer abcdefghijklmnop1234"}',
+        'AWS = "AKIAIOSFODNN7EXAMPLE"',
+    ],
+)
+def test_redact_blanks_secret_values(text):
+    out = explainer.redact(text)
+    assert explainer.REDACTED in out
+    for secret in (SLACK, "hunter2hunter2", "abcdefghijklmnop1234", "AKIAIOSFODNN7EXAMPLE"):
+        assert secret not in out
+
+
+def test_redact_keeps_names_and_clean_code():
+    assert explainer.redact('SLACK_TOKEN = "<REDACTED>"') == 'SLACK_TOKEN = "<REDACTED>"'
+    clean = 'import os\ntoken = os.environ["SLACK_TOKEN"]'
+    assert explainer.redact(clean) == clean
+
+
+def test_secret_never_reaches_prompt_or_output(monkeypatch, tmp_path):
+    src = tmp_path / "slack.py"
+    src.write_text(f'import os\nSLACK_TOKEN = "{SLACK}"\n')
+    prompts = []
+    leaky = (
+        '{"is_real_risk": true, "risk_reasoning": "token ' + SLACK + ' is hardcoded", '
+        '"explanation": "Remove it.", "fixed_code": "SLACK_TOKEN = \\"' + SLACK + '\\""}'
+    )
+    monkeypatch.setattr(explainer, "_chat", lambda p: prompts.append(p) or leaky)
+    f = make_finding(src)
+    f.message = f"Slack token {SLACK} found"
+    [r] = enrich([f])
+    assert SLACK not in prompts[0]
+    assert SLACK not in (r.fixed_code + r.risk_reasoning + r.explanation)
+    assert r.is_real_risk is True  # verdict still set
+
+
+def test_import_check_suggestion_not_overridden(monkeypatch, tmp_path):
+    src = tmp_path / "a.py"
+    src.write_text("import markdown_pdf_x\n")
+    monkeypatch.setattr(explainer, "_chat", lambda p: GOOD)
+    f = Finding(
+        layer="import_check", file=str(src), line=1, severity="high",
+        message="package does not exist", suggested_fix="Did you mean markdown-pdf?",
+    )
+    [r] = enrich([f])
+    assert r.suggested_fix == "Did you mean markdown-pdf?"
+    assert r.fixed_code is None
+    assert r.is_real_risk is True
