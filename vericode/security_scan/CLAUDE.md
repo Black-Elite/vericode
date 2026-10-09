@@ -10,11 +10,14 @@ using Semgrep's offline rulesets.
 ## Build steps
 
 1. `pip install semgrep`.
-2. During setup (`setup.sh`, needs internet once): download the rulesets as
-   YAML into `data/`. `--dryrun` caches nothing, so the files are fetched from
-   `semgrep.dev/c/...`. `p/python` is not used — its injection rules only fire
-   on django/flask taint sources and miss plain `eval` / `os.system`; it's
-   replaced by `p/security-audit` plus the `dangerous-system-call` rule.
+2. During setup (`setup.sh`, needs internet once):
+   `scripts/build_semgrep_rules.py` downloads the rulesets and merges them into
+   one `data/rules.yml`. `--dryrun` caches nothing, hence the download. Rules for
+   languages we never scan are dropped (279 → 134) because semgrep parses every
+   rule on every run, and that parsing is most of the hook's runtime.
+   `p/python` is not used — its injection rules only fire on django/flask taint
+   sources and miss plain `eval` / `os.system`; it's replaced by
+   `p/security-audit` plus the `dangerous-system-call` rule.
 3. Wrap the CLI: `semgrep scan --config <cached-path> --json <staged files>`,
    scoped to staged files only.
 4. Parse Semgrep's JSON output into `Finding` objects (import from
