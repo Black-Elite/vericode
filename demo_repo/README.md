@@ -13,10 +13,12 @@ The source files are stored as `.tmpl` so Vericode's own hook and GitHub never s
 | 3 | `./demo_repo/demo.sh act2`, then `git commit -m "Add backup and server check"` | Two findings with the **same rule and severity**. The AI should mark `tools.py` (user input reaches `os.system`) as real and `backup.py` (only today's date) as a false alarm |
 | 4 | Turn wifi off and repeat step 1 | Still works |
 
-To show the override instead of the fix in step 2: `VERICODE_OVERRIDE=1 git commit -m "..."` (once Layer 4 supports it).
+To show the override instead of the fix in step 2: `VERICODE_OVERRIDE=1 git commit -m "..."`.
+
+**Right before going on stage:** run `./demo_repo/demo.sh warm`. `reset` already warms the local AI, but Ollama unloads the model after 30 idle minutes (`VERICODE_KEEP_ALIVE`). On a CPU-only laptop, a cold first commit took 23.7s; after warming, 9.8s.
 
 ## Notes
 
-- Run on the presentation laptop with 7B. On a CPU-only laptop with 3B, AI calls take 30–50s each and need `VERICODE_TIMEOUT=90`.
+- Works on a laptop with no GPU: the default model, Qwen2.5-Coder 1.5B, takes about 8s per finding. Measured on CPU: act 1 about 9s, act 2 about 16s.
 - Each step stages at most 3 findings that go to the AI, matching the default `VERICODE_MAX_AI_FINDINGS=3`.
 - `reset` only deletes `DEMO_DIR` if this script created it.

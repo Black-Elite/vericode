@@ -286,3 +286,26 @@ def enrich(findings: list[Finding]) -> list[Finding]:
             f"set VERICODE_MAX_AI_FINDINGS to raise it)."
         )
     return findings
+
+
+WARM_UP_FINDING = """A security scanner flagged line 1 of warm_up.py:
+Warm-up request, no real finding.
+Code (">" marks the flagged line; secrets are replaced with <REDACTED>):
+> 1: pass"""
+
+
+def warm_up() -> str | None:
+    """Load the model and let Ollama cache PROMPT_PREFIX, so the first real
+    finding doesn't pay for either. Returns the model name, or None if the
+    local AI isn't reachable. Never raises."""
+    try:
+        model = pick_model()
+        _client().chat(
+            model=model,
+            messages=[{"role": "user", "content": PROMPT_PREFIX + WARM_UP_FINDING}],
+            keep_alive=os.environ.get("VERICODE_KEEP_ALIVE", KEEP_ALIVE),
+            options={"temperature": 0, "num_predict": 1},
+        )
+        return model
+    except Exception:
+        return None
