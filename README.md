@@ -35,14 +35,27 @@ vericode/gate  (renders report, blocks or allows the commit)
 Each layer is independently buildable — see the `CLAUDE.md` in each
 `vericode/<layer>/` folder for that module's spec and "done when" checklist.
 
-## Setup
+## Prerequisites
 
-Requires [`uv`](https://docs.astral.sh/uv/) instead of pip.
+Install these yourself first — `./setup.sh` checks for them but can't install them for you:
+
+- **[uv](https://docs.astral.sh/uv/)** — Manages Python (3.11+, auto-installed by `uv` if missing) and all dependencies.
+- **[Ollama](https://ollama.com)**, running, before you run `setup.sh`:
+  - Windows / Mac: installer from ollama.com.
+  - Arch: `sudo pacman -S ollama`.
+  - Anything else: see ollama.com/download.
+- **git** — to clone this repo and for `pre-commit` to hook into.
+
+Everything else (Rich, Semgrep, pytest, pre-commit, the `ollama` Python client, the Qwen2.5-Coder model) is installed by `./setup.sh`.
+
+## Setup
 
 ```bash
 ./setup.sh      # one-time: uv sync, pulls the Ollama model, caches Semgrep rules, builds the package snapshot
 uv run pre-commit install
 ```
+
+Needs internet only for this one-time step — everything runs offline after.
 
 ## Usage
 
