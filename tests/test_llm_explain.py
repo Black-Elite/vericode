@@ -123,3 +123,22 @@ def test_missing_source_file_still_works(monkeypatch):
 
 def test_empty_list():
     assert enrich([]) == []
+
+
+@pytest.mark.parametrize("raw, expected", [("30", 30.0), ("2.5", 2.5), ("slow", 10.0), ("0", 10.0)])
+def test_timeout_setting(monkeypatch, raw, expected):
+    monkeypatch.setenv("VERICODE_TIMEOUT", raw)
+    assert explainer.timeout_seconds() == expected
+
+
+def test_client_uses_timeout_setting(monkeypatch):
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            seen["timeout"] = timeout
+
+    monkeypatch.setenv("VERICODE_TIMEOUT", "45")
+    monkeypatch.setattr(explainer.ollama, "Client", FakeClient)
+    explainer._client()
+    assert seen["timeout"] == 45.0

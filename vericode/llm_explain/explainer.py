@@ -46,8 +46,21 @@ def build_code_context(file: str, line: int, radius: int = CONTEXT_LINES) -> str
     )
 
 
+def _env_number(name: str, default: float, cast=float):
+    try:
+        value = cast(os.environ.get(name, default))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def timeout_seconds() -> float:
+    """VERICODE_TIMEOUT override; CPU-only laptops need more than the default."""
+    return _env_number("VERICODE_TIMEOUT", TIMEOUT_SECONDS)
+
+
 def _client() -> ollama.Client:
-    return ollama.Client(timeout=TIMEOUT_SECONDS)
+    return ollama.Client(timeout=timeout_seconds())
 
 
 @lru_cache(maxsize=1)
