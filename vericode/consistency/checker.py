@@ -118,8 +118,10 @@ def _dotted(node: ast.AST) -> str:
 def _guards(fn: ast.AST) -> dict[str, str]:
     """Guard-like calls and raised exceptions in a function, with an example of each."""
     found: dict[str, str] = {}
+    # `raise PermissionError(...)` is a raise, not a call to PermissionError
+    raised = {id(n.exc) for n in ast.walk(fn) if isinstance(n, ast.Raise) and n.exc is not None}
     for node in ast.walk(fn):
-        if isinstance(node, ast.Call):
+        if isinstance(node, ast.Call) and id(node) not in raised:
             name = _dotted(node)
             if name and GUARD_WORDS.search(name):
                 found.setdefault(f"call {name}()", ast.unparse(node))
@@ -156,7 +158,7 @@ def _missing_guard(fn: FunctionInfo, others: list[FunctionInfo]) -> Finding | No
     if len(siblings) < MIN_SIBLINGS:
         return None
     best = None
-    for feature in {f for s in siblings for f in s.guards}:
+    for feature in sorted({f for s in siblings for f in s.guards}):
         if feature in fn.guards:
             continue
         having = [s for s in siblings if feature in s.guards]
