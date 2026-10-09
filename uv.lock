@@ -1598,6 +1598,7 @@ name = "vericode"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "certifi" },
     { name = "ollama" },
     { name = "pre-commit" },
     { name = "rich" },
@@ -1611,6 +1612,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = ">=2026.7.22" },
     { name = "ollama" },
     { name = "pre-commit" },
     { name = "rich" },

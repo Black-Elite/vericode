@@ -8,8 +8,11 @@ Writes two newline-separated files of PEP 503-normalized names:
 
 import json
 import re
+import ssl
 from pathlib import Path
 from urllib.request import Request, urlopen
+
+import certifi
 
 DATA_DIR = Path(__file__).parent.parent / "vericode" / "import_check" / "data"
 SIMPLE_INDEX_URL = "https://pypi.org/simple/"
@@ -22,7 +25,8 @@ def normalize(name: str) -> str:
 
 def fetch_json(url: str, accept: str = "application/json") -> dict:
     req = Request(url, headers={"Accept": accept, "User-Agent": "vericode-setup"})
-    with urlopen(req, timeout=120) as resp:
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    with urlopen(req, timeout=120, context=ctx) as resp:
         return json.load(resp)
 
 

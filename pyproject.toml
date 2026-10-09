@@ -8,6 +8,7 @@ dependencies = [
     "semgrep",
     "ollama",
     "pre-commit",
+    "certifi>=2026.7.22",
 ]
 
 [dependency-groups]
