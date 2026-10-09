@@ -19,8 +19,15 @@ hook with a clear terminal report and a block/override gate.
    Findings are filtered to lines this commit actually adds (`added_lines()`,
    from `git diff --cached -U0`), so nobody is blocked by a problem that was
    already in a file they merely touched. This applies to every layer.
+   The layers read files from disk. That is the staged version when run by
+   pre-commit, because pre-commit stashes unstaged edits before running hooks
+   and restores them after (tested: a staged `os.system(sys.argv[1])` was
+   blocked even though the copy on disk had been cleaned up but not staged).
+   Running `python -m vericode.gate.cli` by hand checks the working copy.
 4. Render with Rich: a table per file — line, severity, message, explanation,
-   suggested/fixed code.
+   suggested/fixed code. The AI's verdict is shown in words ("Local AI (real
+   risk)" / "Local AI (false alarm)"), and a finding the AI cleared shows
+   "Fix: none needed" instead of the scanner's generic advice.
 5. Gate logic: any `high` severity Finding → exit code 1, unless
    `VERICODE_OVERRIDE=1` or an interactive confirm is accepted. Log every
    override clearly.
