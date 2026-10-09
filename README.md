@@ -11,6 +11,18 @@ the machine.
 
 Built for **AppBuildersPH Hackathon 2026** (theme: Local AI).
 
+## Demo
+
+A commit being blocked, judged by the local AI, fixed, and allowed through —
+recorded on a laptop with no GPU. To run it yourself, see [`demo_repo/`](demo_repo/).
+
+<details>
+<summary><b>Watch the recording</b></summary>
+
+![Vericode blocking a commit](assets/demo.gif)
+
+</details>
+
 ## Why local AI
 
 Vericode reads your private code on every commit: the changed files, the code
