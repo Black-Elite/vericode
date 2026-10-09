@@ -19,6 +19,7 @@ PRIMARY_MODEL = "qwen2.5-coder:7b"
 FALLBACK_MODEL = "qwen2.5-coder:3b"
 TIMEOUT_SECONDS = 10.0
 MAX_AI_FINDINGS = 3
+KEEP_ALIVE = "30m"
 CONTEXT_LINES = 5
 SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
@@ -128,6 +129,9 @@ def _chat(prompt: str) -> str:
         model=pick_model(),
         messages=[{"role": "user", "content": prompt}],
         format="json",
+        # otherwise ollama unloads the model after ~5 min idle and the next
+        # commit waits for a multi-GB reload
+        keep_alive=os.environ.get("VERICODE_KEEP_ALIVE", KEEP_ALIVE),
         options={"temperature": 0},
     )
     return response.message.content or ""
