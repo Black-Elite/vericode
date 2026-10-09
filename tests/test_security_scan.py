@@ -1,11 +1,6 @@
 import pytest
 
-from vericode.security_scan.scanner import DATA_DIR, run
-
-pytestmark = pytest.mark.skipif(
-    not (DATA_DIR / "secrets.yml").exists(),
-    reason="Semgrep rules missing; run ./setup.sh",
-)
+from vericode.security_scan.scanner import DATA_DIR, MAX_BYTES, run
 
 SECRET = "ghp_016C7869F1A2B3C4D5E6F708192A3B4C5D6E7F"
 
@@ -52,3 +47,31 @@ def test_binary_and_missing_files_do_not_crash(tmp_path):
     binary = tmp_path / "blob.bin"
     binary.write_bytes(b"\x00\xff\xfe")
     assert run([str(binary), str(tmp_path / "gone.py")]) == []
+
+
+def test_oversized_files_are_skipped(tmp_path):
+    big = tmp_path / "big.py"
+    big.write_text(f'TOKEN = "{SECRET}"\n' + "# pad\n" * MAX_BYTES)
+    assert run([str(big)]) == []
+
+
+def test_paths_with_spaces_are_scanned(tmp_path):
+    [finding] = scan(tmp_path, f'TOKEN = "{SECRET}"\n', name="my secrets.py")
+    assert finding.severity == "high"
+
+
+def test_literal_argument_is_lower_severity_than_a_variable(tmp_path):
+    [finding] = scan(tmp_path, 'eval("1 + 1")\n')
+    assert finding.severity == "medium"
+
+
+@pytest.mark.skipif(
+    not (DATA_DIR / "rules.yml").exists(),
+    reason="Semgrep rules missing; run ./setup.sh",
+)
+def test_semgrep_runs_only_when_opted_in(tmp_path, monkeypatch):
+    # betterleaks misses private keys, so this is semgrep-only
+    source = 'KEY = """-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA1234\n-----END RSA PRIVATE KEY-----"""\n'
+    assert scan(tmp_path, source) == []
+    monkeypatch.setenv("VERICODE_SEMGREP", "1")
+    assert scan(tmp_path, source)
