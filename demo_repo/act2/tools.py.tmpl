@@ -1,0 +1,12 @@
+"""Small admin helpers for the notes server."""
+
+import os
+import sys
+
+
+def check_server(host):
+    os.system("ping -c 1 " + host)
+
+
+if __name__ == "__main__":
+    check_server(sys.argv[1])

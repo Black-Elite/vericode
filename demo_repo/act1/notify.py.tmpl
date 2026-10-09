@@ -1,0 +1,16 @@
+"""Post a Slack reminder for notes that are due today."""
+
+from datetime import date
+
+import slack_notify
+
+from notes import list_notes
+
+SLACK_TOKEN = "__SLACK_TOKEN__"
+
+
+def send_due_reminders(channel="#notes"):
+    today = date.today().isoformat()
+    for _, title, _, due in list_notes():
+        if due == today:
+            slack_notify.send(token=SLACK_TOKEN, channel=channel, text=f"Due today: {title}")

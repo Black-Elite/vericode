@@ -1,0 +1,10 @@
+"""Export all notes to a single PDF."""
+
+from markdown_pdf_export import render_pdf
+
+from notes import list_notes
+
+
+def export_pdf(path="notes.pdf"):
+    markdown = "\n\n".join(f"# {title}\n\n{body}" for _, title, body, _ in list_notes())
+    render_pdf(markdown, output=path)

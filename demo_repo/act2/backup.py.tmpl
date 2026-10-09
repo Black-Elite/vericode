@@ -1,0 +1,9 @@
+"""Nightly backup of the notes database."""
+
+import os
+from datetime import date
+
+
+def backup():
+    os.makedirs("backups", exist_ok=True)
+    os.system("cp notes.db backups/notes-" + date.today().isoformat() + ".db")

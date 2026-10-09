@@ -1,0 +1,22 @@
+"""Post a Slack reminder for notes that are due today."""
+
+import os
+from datetime import date
+
+import requests
+
+from notes import list_notes
+
+SLACK_TOKEN = os.environ["SLACK_TOKEN"]
+
+
+def send_due_reminders(channel="#notes"):
+    today = date.today().isoformat()
+    for _, title, _, due in list_notes():
+        if due == today:
+            requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={"Authorization": f"Bearer {SLACK_TOKEN}"},
+                json={"channel": channel, "text": f"Due today: {title}"},
+                timeout=10,
+            )
