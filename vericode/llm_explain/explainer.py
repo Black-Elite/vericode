@@ -21,7 +21,7 @@ PRIMARY_MODEL = "qwen2.5-coder:1.5b"
 FALLBACK_MODEL = "qwen2.5-coder:3b"
 OTHER_MODELS = ("qwen2.5-coder:7b",)
 MAX_ANSWER_TOKENS = 200
-TIMEOUT_SECONDS = 10.0
+TIMEOUT_SECONDS = 30.0  # 1.5b took 11-20s per finding on a CPU-only laptop
 MAX_AI_FINDINGS = 3
 KEEP_ALIVE = "30m"
 CONTEXT_LINES = 5
@@ -124,7 +124,7 @@ def _client() -> ollama.Client:
 
 @lru_cache(maxsize=1)
 def pick_model() -> str:
-    """VERICODE_MODEL override, else 7b, else 3b if only that is pulled.
+    """VERICODE_MODEL override, else the first pulled of 1.5b, 3b, 7b.
     Raises RuntimeError when no usable model is installed."""
     override = os.environ.get("VERICODE_MODEL")
     if override:

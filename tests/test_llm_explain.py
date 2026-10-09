@@ -151,7 +151,7 @@ def test_empty_list():
     assert enrich([]) == []
 
 
-@pytest.mark.parametrize("raw, expected", [("30", 30.0), ("2.5", 2.5), ("slow", 10.0), ("0", 10.0)])
+@pytest.mark.parametrize("raw, expected", [("45", 45.0), ("2.5", 2.5), ("slow", 30.0), ("0", 30.0)])
 def test_timeout_setting(monkeypatch, raw, expected):
     monkeypatch.setenv("VERICODE_TIMEOUT", raw)
     assert explainer.timeout_seconds() == expected
