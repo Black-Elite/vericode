@@ -3,8 +3,12 @@
 # Everything downloaded here is what lets the tool run fully offline later.
 set -euo pipefail
 
-echo "== Installing Python dependencies =="
-pip install -r requirements.txt
+echo "== Installing Python dependencies (uv) =="
+if ! command -v uv &> /dev/null; then
+  echo "uv not found. Install it from https://docs.astral.sh/uv/ before continuing."
+  exit 1
+fi
+uv sync --dev
 
 echo "== Pulling local LLM (Ollama, Qwen2.5-Coder 7B) =="
 if ! command -v ollama &> /dev/null; then
@@ -16,9 +20,9 @@ ollama pull qwen2.5-coder:7b
 # ollama pull qwen2.5-coder:3b
 
 echo "== Caching Semgrep offline rulesets =="
-semgrep --config p/secrets --config p/python --dryrun --metrics=off .
+uv run semgrep --config p/secrets --config p/python --dryrun --metrics=off .
 
 echo "== Building offline PyPI package name snapshot =="
-python3 scripts/build_pypi_snapshot.py
+uv run python scripts/build_pypi_snapshot.py
 
 echo "== Setup done. You can now disconnect from the internet. =="

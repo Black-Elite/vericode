@@ -37,9 +37,11 @@ Each layer is independently buildable — see the `CLAUDE.md` in each
 
 ## Setup
 
+Requires [`uv`](https://docs.astral.sh/uv/) instead of pip.
+
 ```bash
-./setup.sh      # one-time: pulls the Ollama model, caches Semgrep rules, builds the package snapshot
-pre-commit install
+./setup.sh      # one-time: uv sync, pulls the Ollama model, caches Semgrep rules, builds the package snapshot
+uv run pre-commit install
 ```
 
 ## Usage
@@ -71,6 +73,6 @@ the model, cache Semgrep's rulesets, and build the offline package snapshot.
 ## Development
 
 ```bash
-pip install -r requirements.txt
-pytest tests/
+uv sync --dev
+uv run pytest tests/
 ```

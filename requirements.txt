@@ -1,5 +1,0 @@
-rich
-semgrep
-ollama
-pytest
-pre-commit

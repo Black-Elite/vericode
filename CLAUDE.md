@@ -33,7 +33,9 @@ silently otherwise.
 
 ## Tech stack
 
-- Python 3.11+
+- Python 3.11+, managed with `uv` — not pip. Dependencies live in `pyproject.toml`
+  / `uv.lock`. Don't add a `requirements.txt` or run bare `pip install`; use
+  `uv add <package>` so the lockfile stays correct for everyone.
 - Local LLM: Ollama, `qwen2.5-coder:7b` (fallback `qwen2.5-coder:3b` on slower hardware)
 - Security rules: Semgrep (`p/secrets`, `p/python`), cached locally for offline use
 - Parsing: stdlib `ast`, `importlib.util`, `sys.stdlib_module_names`
@@ -56,7 +58,8 @@ silently otherwise.
 ## Commands
 
 ```bash
-./setup.sh                 # one-time: pulls model, builds package snapshot, caches semgrep rules
-pytest tests/               # run tests
-python -m vericode.gate.cli # run the gate manually against currently staged files
+./setup.sh                        # one-time: pulls model, builds package snapshot, caches semgrep rules
+uv run pytest tests/              # run tests
+uv run python -m vericode.gate.cli # run the gate manually against currently staged files
+uv add <package>                   # add a new dependency (updates pyproject.toml + uv.lock)
 ```
