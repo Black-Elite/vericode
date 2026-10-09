@@ -21,9 +21,12 @@ ollama pull qwen2.5-coder:7b
 
 echo "== Caching Semgrep offline rulesets =="
 # --dryrun caches nothing; fetch the rules as files so commit-time stays offline.
+# p/python was framework-only (django/flask taint sources) and missed plain
+# os.system / eval, so it's replaced by security-audit + the syscall rule.
 mkdir -p vericode/security_scan/data
 curl -fsSL -o vericode/security_scan/data/secrets.yml https://semgrep.dev/c/p/secrets
-curl -fsSL -o vericode/security_scan/data/python.yml https://semgrep.dev/c/p/python
+curl -fsSL -o vericode/security_scan/data/security-audit.yml https://semgrep.dev/c/p/security-audit
+curl -fsSL -o vericode/security_scan/data/system-call.yml https://semgrep.dev/c/r/python.lang.security.audit.dangerous-system-call
 
 echo "== Building offline PyPI package name snapshot =="
 uv run python scripts/build_pypi_snapshot.py
