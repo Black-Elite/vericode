@@ -1,0 +1,41 @@
+"""Import names that differ from their PyPI distribution names. Only needed
+for packages that aren't installed; installed ones are resolved through
+importlib.metadata.packages_distributions().
+"""
+
+IMPORT_TO_DIST = {
+    "attr": "attrs",
+    "bs4": "beautifulsoup4",
+    "Crypto": "pycryptodome",
+    "cv2": "opencv-python",
+    "dateutil": "python-dateutil",
+    "discord": "discord-py",
+    "docx": "python-docx",
+    "dotenv": "python-dotenv",
+    "faiss": "faiss-cpu",
+    "fitz": "pymupdf",
+    "git": "gitpython",
+    "gi": "pygobject",
+    "google": "protobuf",
+    "jose": "python-jose",
+    "jwt": "pyjwt",
+    "kafka": "kafka-python",
+    "Levenshtein": "python-levenshtein",
+    "magic": "python-magic",
+    "multipart": "python-multipart",
+    "MySQLdb": "mysqlclient",
+    "OpenSSL": "pyopenssl",
+    "PIL": "pillow",
+    "pptx": "python-pptx",
+    "serial": "pyserial",
+    "skimage": "scikit-image",
+    "sklearn": "scikit-learn",
+    "slugify": "python-slugify",
+    "socketio": "python-socketio",
+    "telegram": "python-telegram-bot",
+    "usb": "pyusb",
+    "win32api": "pywin32",
+    "wx": "wxpython",
+    "yaml": "pyyaml",
+    "zmq": "pyzmq",
+}
