@@ -1,10 +1,12 @@
-"""Layer 2: wraps Semgrep's offline rulesets for secrets/injection risks. No
-custom AI. See CLAUDE.md in this folder for the full spec.
+"""Layer 2: flags hardcoded secrets and unsafe calls in staged files. No custom
+AI. See CLAUDE.md in this folder for the full spec.
 """
 
 from __future__ import annotations
 
+import ast
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -28,6 +30,60 @@ def _rule_file() -> str:
 
 def _skipped(scanner: str, reason: str) -> None:
     print(f"vericode: {scanner} scan skipped ({reason}).", file=sys.stderr)
+
+
+def _call_name(call: ast.Call) -> str:
+    parts, node = [], call.func
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _unsafe_call(call: ast.Call) -> str:
+    name = _call_name(call)
+    if name in ("eval", "exec"):
+        return f"{name}()"
+    if name == "os.system":
+        return "os.system()"
+    if name.startswith("subprocess."):
+        for kw in call.keywords:
+            if kw.arg == "shell" and getattr(kw.value, "value", False) is True:
+                return f"{name}(shell=True)"
+    return ""
+
+
+def _ast_scan(files: list[str]) -> list[Finding]:
+    findings = []
+    for file in files:
+        if not file.endswith(".py"):
+            continue
+        try:
+            tree = ast.parse(Path(file).read_text(encoding="utf-8"), filename=file)
+        except (SyntaxError, UnicodeDecodeError, OSError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            what = _unsafe_call(node)
+            if not what:
+                continue
+            # a literal argument can't be attacker-controlled
+            literal = all(isinstance(a, ast.Constant) for a in node.args) and bool(node.args)
+            findings.append(Finding(
+                layer="security_scan",
+                file=file,
+                line=node.lineno,
+                severity="medium" if literal else "high",
+                message=(
+                    f"{what} runs whatever it is given. If any part of that value comes from "
+                    f"user input, a request, or a file, this is remote code execution."
+                ),
+                suggested_fix=f"Replace {what} with an explicit call that cannot run arbitrary code.",
+            ))
+    return findings
 
 
 def _severity(semgrep_severity: str, confidence: str | None) -> Severity:
@@ -114,9 +170,14 @@ def run(staged_files: list[str]) -> list[Finding]:
     if not files:
         return []
 
+    # semgrep costs ~3s per run against ~50ms for the rest, so it's opt-in
+    scanned = _betterleaks(files) + _ast_scan(files)
+    if os.environ.get("VERICODE_SEMGREP"):
+        scanned += _semgrep(files)
+
     findings: list[Finding] = []
     seen = set()
-    for finding in _betterleaks(files) + _semgrep(files):
+    for finding in scanned:
         key = (finding.file, finding.line)
         if key in seen:
             continue
