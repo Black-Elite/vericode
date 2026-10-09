@@ -1,0 +1,15 @@
+"""In-memory note storage for the API."""
+
+_NOTES = {}
+
+
+def get(note_id):
+    return _NOTES[note_id]
+
+
+def save(note):
+    _NOTES[note.id] = note
+
+
+def delete(note):
+    _NOTES.pop(note.id, None)

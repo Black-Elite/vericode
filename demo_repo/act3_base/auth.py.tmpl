@@ -1,0 +1,6 @@
+"""Access control for notes."""
+
+
+def check_owner(note, user):
+    if note.owner != user:
+        raise PermissionError("This note belongs to someone else.")

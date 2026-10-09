@@ -3,6 +3,8 @@
 #   ./demo_repo/demo.sh reset   fresh repo with the hook installed; stages act 1 (should be blocked)
 #   ./demo_repo/demo.sh fix     stages the fixed export.py and notify.py (should pass)
 #   ./demo_repo/demo.sh act2    stages backup.py and tools.py (AI tells the real risk from the false alarm)
+#   ./demo_repo/demo.sh act3    commits a notes API, then stages a new handler that skips the
+#                               ownership check every other handler does, plus a copied helper
 #   ./demo_repo/demo.sh warm    loads the local AI again (run right before going on stage)
 # Repo location: $DEMO_DIR, default ~/vericode-demo.
 set -euo pipefail
@@ -106,10 +108,27 @@ act2() {
   echo "Next: git commit -m \"Add backup and server check\"   (AI should flag tools.py, dismiss backup.py)"
 }
 
+act3() {
+  require_demo_repo
+  # Start from a clean tree, whatever earlier steps left staged (demo repo only).
+  git reset -q --hard HEAD
+  git clean -q -fd
+  copy_templates act3_base
+  git add -A
+  # already committed on a previous run: nothing to commit, so skip
+  git diff --cached --quiet || git commit -q --no-verify -m "Notes API: handlers with ownership checks"
+  copy_templates act3
+  git add notes_api.py reminders.py
+  echo "Committed a notes API whose handlers all call check_owner(); staged a new delete_note"
+  echo "that doesn't, plus reminders.py with a copied helper."
+  echo "Next: git commit -m \"Add delete endpoint and reminders\"   (missing check should block)"
+}
+
 case "${1:-}" in
   reset) reset ;;
   fix) fix ;;
   act2) act2 ;;
+  act3) act3 ;;
   warm) warm ;;
-  *) echo "Usage: $0 reset|fix|act2|warm" >&2; exit 1 ;;
+  *) echo "Usage: $0 reset|fix|act2|act3|warm" >&2; exit 1 ;;
 esac

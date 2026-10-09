@@ -1,0 +1,10 @@
+"""Text for reminder notifications."""
+
+from datetime import date
+
+
+def due_label(n):
+    if not n.due:
+        return "no due date"
+    days = (n.due - date.today()).days
+    return f"due in {days} days" if days >= 0 else f"overdue by {-days} days"
