@@ -25,15 +25,19 @@ All running entirely on-device via Ollama.
    what reaches a dangerous call (command-line input, a web request, a value
    the program generates, a fixed command) or whether a secret looks like a
    placeholder. It also decides whether the AI is allowed to clear the finding.
-3. The prompt holds the scanner's message, that fact, and 5 lines either side,
-   with secrets redacted. Ollama is given a JSON schema so the answer is always
+3. The prompt starts with fixed instructions and 3 short example answers, then
+   the finding: the scanner's message, that fact, and 3 lines either side, with
+   secrets redacted. Fixed text first lets Ollama reuse its work between
+   findings; the examples are what made the 1.5B model write fixes as code. Ollama is given a JSON schema so the answer is always
    `{"reason", "is_real_risk", "fix"}` **in that order**: with the verdict
    first, small models answered before reasoning and contradicted themselves.
 4. Safety rule: a "false alarm" verdict lowers the finding to low **only if
    the evidence agrees**. Otherwise it keeps blocking, with the AI's reason
    shown as a note. Real-looking secrets and fake imports are never cleared.
 5. Public function: `enrich(findings: list[Finding]) -> list[Finding]`. Only
-   findings already flagged by Layers 1-2 go to the model.
+   findings already flagged by Layer 2 go to the model. Import findings are
+   skipped: the AI may never clear them, and Layer 1's "Did you mean" is a
+   better fix than the model's.
 
 ## Settings (environment variables)
 
@@ -67,8 +71,10 @@ this one doesn't"). The prompt already includes `message`, so no change is neede
   response never crashes the hook.
 - Hard timeout per call (30s by default) with a graceful fallback message — a
   hang here would kill the live demo.
-- Small models often write fixes as advice ("Replace X with...") rather than
-  code. Being worked on.
+- The 1.5B model calls placeholder secrets ("changeme") real risks. Safe
+  direction (the commit is blocked), but noisy.
+- A fix can parse as code without fixing anything: for `eval(input())` it
+  returned the same line. Treat the AI's fix as a suggestion.
 - In the gate's report, render the same finding two ways: the flat
   static-rule message, and this layer's explanation/fix, side by side. That
   comparison is what proves to judges the LLM is doing real reasoning, not
