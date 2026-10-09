@@ -133,3 +133,12 @@ def test_works_outside_a_git_repo(tmp_path):
     new.write_text("from router import route\n" + handler("delete_note", guarded=False))
     [finding] = run([str(new)])
     assert finding.severity == "high"
+
+
+def test_duplicate_of_a_function_in_a_file_that_is_also_being_edited(tmp_path):
+    original = "from datetime import date\n" + DUE.format(name="format_due", arg="note")
+    staged = repo(tmp_path, {"notes_api.py": original},
+                  {"notes_api.py": original + "\n\ndef added():\n    return 1\n",
+                   "reminders.py": "from datetime import date\n" + DUE.format(name="due_label", arg="n")})
+    messages = [f.message for f in run(staged)]
+    assert any("due_label has the same logic as format_due" in m for m in messages)

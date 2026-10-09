@@ -54,7 +54,9 @@ def run(staged_files: list[str]) -> list[Finding]:
         missing = _missing_guard(fn, others)
         if missing:
             findings.append(missing)
-        duplicate = _duplicate(fn, existing)
+        # unchanged functions in edited files count as "existing" too; the gate's
+        # added-lines filter keeps only the report on the new copy
+        duplicate = _duplicate(fn, others)
         if duplicate:
             findings.append(duplicate)
     return findings
