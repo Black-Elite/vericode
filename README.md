@@ -11,13 +11,8 @@ the machine.
 
 Built for **AppBuildersPH Hackathon 2026** (theme: Local AI).
 
-## Demo
-
-A commit being blocked, judged by the local AI, fixed, and allowed through —
-recorded on a laptop with no GPU. To run it yourself, see [`demo_repo/`](demo_repo/).
-
 <details>
-<summary><b>Watch the recording</b></summary>
+<summary><b>Watch it run</b> — a commit blocked, judged by the local AI, fixed, and allowed through, on a laptop with no GPU.</summary>
 
 ![Vericode blocking a commit](assets/demo.gif)
 
@@ -80,11 +75,20 @@ Python client, the Qwen2.5-Coder 1.5B model) is installed by `./setup.sh`.
 ## Setup
 
 ```bash
-./setup.sh      # one-time: uv sync, pulls the model, caches Semgrep rules, builds the PyPI name lists
-uv run pre-commit install
+git clone https://github.com/Black-Elite/vericode.git
+cd vericode
+./setup.sh                 # one-time: uv sync, pulls the model, caches Semgrep rules, builds the PyPI name lists
+uv run pre-commit install  # registers the git hook so commits are checked
 ```
 
 Needs internet only for this one-time step. Everything runs offline after.
+
+Check it worked:
+
+```bash
+uv run pytest tests/       # 124 tests
+./demo_repo/demo.sh reset  # then commit in the demo repo — see Demo below
+```
 
 ## Usage
 

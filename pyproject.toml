@@ -2,6 +2,9 @@
 name = "vericode"
 version = "0.1.0"
 description = "Offline AI code verification - a Git pre-commit hook that catches hallucinated imports, insecure code, and false-positive noise using a local LLM."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "rich",
@@ -12,6 +15,12 @@ dependencies = [
     "pybetterleaks>=0.6.2",
     "pyyaml>=6.0.3",
 ]
+
+[project.scripts]
+vericode = "vericode.gate.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Black-Elite/vericode"
 
 [dependency-groups]
 dev = [
