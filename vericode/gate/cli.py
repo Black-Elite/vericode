@@ -177,7 +177,25 @@ def _missing_file_message(exc: FileNotFoundError) -> tuple[str, str]:
     return f"File not found: {name}", ""
 
 
+def _command(argv: list[str]) -> int:
+    """`vericode install [path]` and `vericode doctor`. With no command,
+    vericode runs as the pre-commit hook."""
+    from vericode.gate.commands import doctor, install
+
+    parser = argparse.ArgumentParser(prog="vericode")
+    sub = parser.add_subparsers(dest="command", required=True)
+    install_cmd = sub.add_parser("install", help="turn the Vericode hook on in a git repo")
+    install_cmd.add_argument("path", nargs="?", default=".", help="repo to protect (default: here)")
+    sub.add_parser("doctor", help="check that everything Vericode needs is set up")
+    args = parser.parse_args(argv)
+    return install(args.path) if args.command == "install" else doctor()
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["install"] or argv[:1] == ["doctor"]:
+        return _command(argv)
+
     parser = argparse.ArgumentParser(prog="vericode")
     parser.add_argument("--ascii", action="store_true")
     parser.add_argument("--banner", action="store_true")
