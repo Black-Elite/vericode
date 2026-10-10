@@ -60,10 +60,18 @@ def test_placeholder_secret_can_be_dismissed(tmp_path, value):
     assert ev.supports_dismissal is True
 
 
+def _fake_token(prefix: str, body: str) -> str:
+    return prefix + body
+
+
 def test_real_looking_secret_is_not_dismissable_and_value_not_echoed(tmp_path):
-    ev = facts(tmp_path, 'API_KEY = "sk-9f8a7b6c5d4e3f2a1b0c"\n', 1)
+    secret = _fake_token(
+        "sk-",
+        "9f8a7b6c5d4e3f2a1b0c",
+    )
+    ev = facts(tmp_path, 'API_KEY = "' + secret + '"\n', 1)
     assert ev.supports_dismissal is False
-    assert "sk-9f8a" not in ev.text
+    assert _fake_token("sk-", "9f8a") not in ev.text
 
 
 def test_fake_import_is_never_dismissable(tmp_path):

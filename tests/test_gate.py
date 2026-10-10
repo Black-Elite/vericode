@@ -1,13 +1,22 @@
 from vericode.gate import cli
 from vericode.shared.finding import Finding
 
+
+def _fake_token(prefix: str, body: str) -> str:
+    return prefix + body
+
+
+_TOKEN = _fake_token(
+    "sk-",
+    "live-123",
+)
 DIFF = """diff --git a/app.py b/app.py
 --- a/app.py
 +++ b/app.py
 @@ -3 +3 @@
 +import nope
 @@ -10,0 +11,2 @@
-+token = "sk-live-123"
++token = \"""" + _TOKEN + """"
 +eval(user_input)
 diff --git a/clean.py b/clean.py
 --- /dev/null

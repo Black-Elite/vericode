@@ -21,6 +21,8 @@ from vericode.shared.finding import Finding
 # 1.5b: 6/7 verdicts at ~8s per finding on a CPU-only laptop in our benchmark.
 PRIMARY_MODEL = "qwen2.5-coder:1.5b"
 FALLBACK_MODEL = "qwen2.5-coder:3b"
+# Every outage note starts with this so the gate can match it without parsing the cause.
+LLM_UNAVAILABLE_PREFIX = "LLM unavailable, showing static check only"
 OTHER_MODELS = ("qwen2.5-coder:7b",)
 MAX_ANSWER_TOKENS = 200
 TIMEOUT_SECONDS = 30.0  # 1.5b took 11-20s per finding on a CPU-only laptop
@@ -233,6 +235,26 @@ def parse_response(raw: str) -> dict:
     }
 
 
+def _is_timeout(exc: Exception) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    return any(cls.__name__ == "TimeoutException" for cls in type(exc).__mro__)
+
+
+def _unavailable_detail(exc: Exception) -> str:
+    """A short cause with no URL and no traceback. The setting name is VERICODE_TIMEOUT."""
+    if isinstance(exc, ConnectionError) or type(exc).__name__ == "ConnectError":
+        return "Local AI is off. Start it with: ollama serve"
+    missing_model = (
+        isinstance(exc, ollama.ResponseError) and getattr(exc, "status_code", None) == 404
+    ) or (isinstance(exc, RuntimeError) and "no model installed" in str(exc))
+    if missing_model:
+        return f"Model not found. Run: ollama pull {PRIMARY_MODEL}"
+    if _is_timeout(exc):
+        return "Local AI took too long. Try a smaller model or raise VERICODE_TIMEOUT"
+    return f"Local AI failed ({type(exc).__name__}). Showing static checks only."
+
+
 def repair_code(code: str | None) -> str | None:
     """Small models sometimes leave one stray quote in otherwise valid code
     (`host'],` for `host],`). If deleting a single quote makes the fix parse,
@@ -268,7 +290,7 @@ def _enrich_one(finding: Finding) -> None:
     try:
         fields = parse_response(_chat(prompt))
     except Exception as exc:  # timeout, connection refused, missing model, ...
-        finding.explanation = f"LLM unavailable, showing static check only ({type(exc).__name__}: {exc})"
+        finding.explanation = f"{LLM_UNAVAILABLE_PREFIX} ({_unavailable_detail(exc)})"
         return
 
     # Redact again on the way out: the model may echo or hallucinate a secret.

@@ -8,6 +8,7 @@ on each call, after use_ascii() may have switched Windows stdout to UTF-8.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from contextlib import contextmanager
 from typing import Iterator
@@ -18,6 +19,7 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.theme import Theme
 
+from vericode.llm_explain.explainer import LLM_UNAVAILABLE_PREFIX
 from vericode.shared.finding import Finding
 
 # Navy (#0B2545) is part of the palette but is too dark to use as a border
@@ -33,6 +35,12 @@ _THEME = Theme(
 )
 
 _PATCH_LINE_LIMIT = 12
+# False until the doctor command is merged. The line below is not printed while this is false.
+SHOW_DOCTOR_STEP = False
+_DOCTOR_LINE = "Run vericode doctor."
+
+_TOKEN_SHAPES = re.compile(r"ghp_[A-Za-z0-9]+|sk-[A-Za-z0-9_-]+|AKIA[A-Za-z0-9]+|xox[A-Za-z0-9-]+")
+_QUOTED_SECRET = re.compile(r"""(["'])([^"'\n]{9,})\1""")
 
 _SEVERITY_DISPLAY: dict[str, tuple[str, str, str]] = {
     "high": ("CRITICAL", "red", "critical"),
@@ -105,6 +113,16 @@ _ASCII_BANNER_BLOCKED = (
 )
 
 
+def console_options() -> dict:
+    """Color stays off unless the hook opts in. NO_COLOR wins over that opt-in."""
+    if "NO_COLOR" in os.environ:
+        return {"no_color": True, "force_terminal": False}
+    if os.environ.get("VERICODE_COLOR") == "1":
+        # legacy_windows would call the Win32 console API and emit no codes on a pipe.
+        return {"force_terminal": True, "color_system": "standard", "legacy_windows": False}
+    return {}
+
+
 def _console() -> Console:
     """Build a console at call time. Never cached, never forced into color."""
     # soft_wrap keeps piped hook logs from hard-breaking sentences at column 80.
@@ -114,6 +132,7 @@ def _console() -> Console:
         emoji=False,
         soft_wrap=True,
         theme=_THEME,
+        **console_options(),
     )
 
 
@@ -128,6 +147,59 @@ def _face(status: str, ascii_mode: bool) -> str:
 
 def _has_text(value: str | None) -> bool:
     return value is not None and value != ""
+
+
+def mask_quotes_for(finding: Finding | None) -> bool:
+    """The only layer check for quoted strings. Tokens are masked everywhere."""
+    return finding is not None and finding.layer == "security_scan"
+
+
+def mask_secrets(text: str, *, mask_quotes: bool = False) -> str:
+    """Hide token shapes. Long quotes are hidden only when mask_quotes is set."""
+
+    def hide(value: str) -> str:
+        return value[:4] + "****"
+
+    text = _TOKEN_SHAPES.sub(lambda match: hide(match.group(0)), text)
+    if not mask_quotes:
+        return text
+
+    def hide_quoted(match: re.Match) -> str:
+        quote, body = match.group(1), match.group(2)
+        return f"{quote}{hide(body)}{quote}"
+
+    return _QUOTED_SECRET.sub(hide_quoted, text)
+
+
+def fold_ascii(text: str) -> str:
+    """ASCII mode: dashes, quotes, and ellipsis become plain text. Anything else is '?'."""
+    text = (
+        text.replace("\u2014", "-")
+        .replace("\u2013", "-")
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2026", "...")
+    )
+    return "".join(char if ord(char) < 128 else "?" for char in text)
+
+
+def display_text(text: str, ascii_mode: bool, *, mask_quotes: bool = False) -> str:
+    text = mask_secrets(text, mask_quotes=mask_quotes)
+    if ascii_mode:
+        return fold_ascii(text)
+    return text
+
+
+def friendly_unavailable(text: str) -> str:
+    """Drop the matching prefix. The user sees only the friendly sentence."""
+    if not text.startswith(LLM_UNAVAILABLE_PREFIX):
+        return text
+    rest = text[len(LLM_UNAVAILABLE_PREFIX):].strip()
+    if rest.startswith("(") and rest.endswith(")"):
+        return rest[1:-1].strip()
+    return rest
 
 
 def _stdout_isatty() -> bool:
@@ -201,17 +273,78 @@ def use_ascii(flag: bool) -> bool:
     return "utf" not in encoding.lower()
 
 
+def override_forms() -> list[str]:
+    """Each override command, whole. A Windows hook with a Unix shell gets both."""
+    unix = "VERICODE_OVERRIDE=1 git commit"
+    powershell = "$env:VERICODE_OVERRIDE=1; git commit"
+    if sys.platform == "win32" and (os.environ.get("MSYSTEM") or os.environ.get("SHELL")):
+        return [unix, powershell]
+    if sys.platform == "win32":
+        return [powershell]
+    return [unix]
+
+
 def override_hint() -> str:
     """One-line shell snippet for allowing a blocked commit.
 
     Git Bash on Windows still reports sys.platform == "win32", but it cannot
-    run the PowerShell assignment. MSYSTEM or SHELL means a Unix-style shell.
+    run the PowerShell assignment. MSYSTEM or SHELL means a Unix-style shell,
+    so a Windows hook names both forms. The report prints those forms on
+    separate lines so neither command is split.
     """
-    if os.environ.get("MSYSTEM") or os.environ.get("SHELL"):
-        return "VERICODE_OVERRIDE=1 git commit"
-    if sys.platform == "win32":
-        return "$env:VERICODE_OVERRIDE=1; git commit"
-    return "VERICODE_OVERRIDE=1 git commit"
+    forms = override_forms()
+    if len(forms) == 2:
+        return f"{forms[0]}  (PowerShell: {forms[1]})"
+    return forms[0]
+
+
+def _ai_fix(text: str) -> str | None:
+    if "ollama serve" in text:
+        return "Start the local AI: ollama serve"
+    marker = "ollama pull "
+    if marker in text:
+        command = text[text.index(marker):].split(")")[0].strip()
+        return f"Pull the local model: {command}"
+    if "VERICODE_TIMEOUT" in text:
+        return "Try a smaller model or raise VERICODE_TIMEOUT"
+    if text.startswith(LLM_UNAVAILABLE_PREFIX):
+        return "Local AI failed. Showing static checks only."
+    return None
+
+
+def render_next_steps(status: str, findings: list[Finding], ascii_mode: bool) -> None:
+    """Footer. Passed commits stop at the verdict. Doctor stays hidden until the constant flips."""
+    console = _console()
+    if status == "warning":
+        console.print(Text(display_text("Commit allowed. Review the warnings when you can.", ascii_mode)))
+        return
+    if status != "blocked":
+        return
+    console.print(Text("Next steps", style="bold"))
+    console.print(Text("1) Fix the lines above, then git add and git commit again."))
+    forms = override_forms()
+    if len(forms) == 1:
+        console.print(Text(f"2) To commit anyway: {forms[0]}"))
+    else:
+        console.print(Text("2) To commit anyway:"))
+        for form in forms:
+            console.print(Text(f"   {form}"))
+    unavailable = next(
+        (
+            finding.explanation
+            for finding in findings
+            if finding.is_real_risk is None
+            and finding.explanation
+            and finding.explanation.startswith(LLM_UNAVAILABLE_PREFIX)
+        ),
+        None,
+    )
+    if unavailable:
+        fix = _ai_fix(unavailable)
+        if fix:
+            console.print(Text(display_text(f"3) {fix}", ascii_mode)))
+    if SHOW_DOCTOR_STEP:
+        console.print(Text(display_text(_DOCTOR_LINE, ascii_mode)))
 
 
 @contextmanager
@@ -232,14 +365,31 @@ def scanning(ascii_mode: bool) -> Iterator[None]:
 
 def header(status: str, ascii_mode: bool) -> None:
     """One brand line: outcome face, name, and the offline badge."""
+    verdict_banner(status, "", ascii_mode)
+
+
+def verdict_banner(status: str, counts: str, ascii_mode: bool) -> None:
+    """First line: face, name, verdict, counts. The offline badge is the next dim line."""
+    word = {"blocked": "Blocked", "warning": "Warning", "passed": "Passed"}.get(
+        status, status.capitalize()
+    )
+    word_style = {"blocked": "bold red", "warning": "bold orange", "passed": "bold teal"}.get(
+        status, "bold"
+    )
     line = Text()
     line.append(_face(status, ascii_mode))
     line.append(" ")
     line.append("VERICODE", style="bold teal")
     line.append("  ")
-    line.append(_symbols(ascii_mode)["offline"], style="teal")
-    line.append(" Running 100% on this device", style="muted")
+    line.append(word, style=word_style)
+    if counts:
+        line.append(": ")
+        line.append(counts)
     _console().print(line)
+    badge = Text()
+    badge.append(_symbols(ascii_mode)["offline"], style="muted")
+    badge.append(" Running 100% on this device", style="muted")
+    _console().print(badge)
 
 
 def robot_banner(ascii_mode: bool, status: str = "idle") -> None:
@@ -251,7 +401,6 @@ def robot_banner(ascii_mode: bool, status: str = "idle") -> None:
     console = _console()
     for row in art:
         console.print(Text(row, style="teal"))
-    console.print()
 
 
 def render_finding(finding: Finding, ascii_mode: bool) -> None:
@@ -269,28 +418,39 @@ def render_finding(finding: Finding, ascii_mode: bool) -> None:
     title.append(f"  {finding.file}:{finding.line}", style="muted")
     console.print(title)
     # Plain Text, markup disabled: brackets in the message stay literal.
-    console.print(Text(f"  {finding.message}"))
+    quotes = mask_quotes_for(finding)
+    console.print(Text(f"  {display_text(finding.message, ascii_mode, mask_quotes=quotes)}"))
 
-    _detail(console, "Fix:", finding.suggested_fix, "orange")
-    _detail(console, "Why:", finding.explanation, "muted")
-    _patch(console, finding.fixed_code)
-    _detail(console, "Risk note:", finding.risk_reasoning, "muted")
+    _detail(console, "Fix:", finding.suggested_fix, "orange", ascii_mode, quotes)
+    shown_why = finding.explanation
+    if shown_why and shown_why.startswith(LLM_UNAVAILABLE_PREFIX):
+        shown_why = friendly_unavailable(shown_why)
+    _detail(console, "Why:", shown_why, "muted", ascii_mode, quotes)
+    _patch(console, finding.fixed_code, ascii_mode, quotes)
+    _detail(console, "Risk note:", finding.risk_reasoning, "muted", ascii_mode, quotes)
     console.print()
 
 
-def _detail(console: Console, label: str, value: str | None, style: str) -> None:
+def _detail(
+    console: Console,
+    label: str,
+    value: str | None,
+    style: str,
+    ascii_mode: bool,
+    mask_quotes: bool,
+) -> None:
     if not _has_text(value):
         return
     line = Text("  ")
     line.append(f"{label} ", style="muted")
-    line.append(value or "", style=style)
+    line.append(display_text(value or "", ascii_mode, mask_quotes=mask_quotes), style=style)
     console.print(line)
 
 
-def _patch(console: Console, fixed_code: str | None) -> None:
+def _patch(console: Console, fixed_code: str | None, ascii_mode: bool, mask_quotes: bool) -> None:
     if not _has_text(fixed_code):
         return
-    lines = (fixed_code or "").splitlines() or [""]
+    lines = display_text(fixed_code or "", ascii_mode, mask_quotes=mask_quotes).splitlines() or [""]
     shown = lines[:_PATCH_LINE_LIMIT]
     console.print(Text("  Patch:", style="muted"))
     for line in shown:
