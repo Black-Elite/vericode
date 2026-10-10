@@ -163,7 +163,8 @@ def run_checks(cwd: Path) -> list[tuple[str, bool, str, bool]]:
         required=False)
 
     root = _git_root(cwd)
-    if root is not None:
+    # Inside the vericode checkout itself there's nothing to protect yet.
+    if root is not None and root.resolve() != VERICODE_HOME:
         config_path = root / ".pre-commit-config.yaml"
         configured = config_path.exists() and _has_vericode(yaml.safe_load(config_path.read_text()) or {})
         hooked = (root / ".git" / "hooks" / "pre-commit").exists()
