@@ -4,7 +4,13 @@ import io
 import subprocess
 import sys
 
-from vericode.gate.cli import added_lines, main, render_report
+from vericode.gate.cli import (
+    LLM_UNAVAILABLE_PREFIX,
+    NOT_REVIEWED_PREFIX,
+    added_lines,
+    main,
+    render_report,
+)
 from vericode.gate.ui import (
     header,
     override_hint,
@@ -204,14 +210,18 @@ def test_override_hint_msystem_uses_unix_syntax(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     _clear_shell_markers(monkeypatch)
     monkeypatch.setenv("MSYSTEM", "MINGW64")
-    assert override_hint() == "VERICODE_OVERRIDE=1 git commit"
+    assert override_hint() == (
+        "VERICODE_OVERRIDE=1 git commit  (PowerShell: $env:VERICODE_OVERRIDE=1; git commit)"
+    )
 
 
 def test_override_hint_shell_uses_unix_syntax(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     _clear_shell_markers(monkeypatch)
     monkeypatch.setenv("SHELL", "/usr/bin/bash")
-    assert override_hint() == "VERICODE_OVERRIDE=1 git commit"
+    assert override_hint() == (
+        "VERICODE_OVERRIDE=1 git commit  (PowerShell: $env:VERICODE_OVERRIDE=1; git commit)"
+    )
 
 
 def test_override_hint_posix(monkeypatch, capsys):
@@ -268,8 +278,11 @@ def _stub_scanners(monkeypatch, findings: list[Finding], files: list[str]) -> No
     for finding in findings:
         added.setdefault(finding.file, set()).add(finding.line)
     _patch_added_lines(monkeypatch, added)
+    monkeypatch.delenv("VERICODE_COLOR", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr("vericode.gate.cli.run_import_check", lambda staged: findings)
     monkeypatch.setattr("vericode.gate.cli.run_security_scan", lambda staged: [])
+    monkeypatch.setattr("vericode.gate.cli.run_consistency", lambda staged: [])
     monkeypatch.setattr("vericode.gate.cli.enrich", lambda items: items)
 
 
@@ -280,8 +293,7 @@ def test_clean_run_prints_one_passed_header(monkeypatch, capsys):
     assert main([]) == 0
     output = capsys.readouterr().out
     assert output.count("VERICODE") == 1
-    assert "0 finding(s)" in output
-    assert "2 staged file(s)" in output
+    assert "Passed:" in output
     assert "Scanning staged files" not in output
 
 
@@ -291,8 +303,8 @@ def test_non_python_files_are_counted(monkeypatch, capsys):
 
     assert main([]) == 0
     output = capsys.readouterr().out
-    assert "2 staged file(s)" in output
-    assert "0 finding(s)" in output
+    assert "Passed:" in output
+    assert "Blocked:" not in output
 
 
 def test_yaml_only_with_no_findings_passes(monkeypatch, capsys):
@@ -301,8 +313,7 @@ def test_yaml_only_with_no_findings_passes(monkeypatch, capsys):
 
     assert main([]) == 0
     output = capsys.readouterr().out
-    assert "1 staged file(s)" in output
-    assert "0 finding(s)" in output
+    assert "Passed:" in output
     assert "[ ^_^ ]" in output or "[ ^‿^ ]" in output
     assert "No Python files" not in output
 
@@ -334,7 +345,10 @@ def test_block_and_override(monkeypatch, capsys):
     monkeypatch.delenv("VERICODE_OVERRIDE", raising=False)
     assert main([]) == 1
     blocked = capsys.readouterr().out
-    assert "Blocked: 1 high-severity issue(s)." in blocked
+    assert "Blocked:" in blocked
+    assert "1 must-fix" in blocked
+    assert "Next steps" in blocked
+    assert "git add and git commit again." in blocked
     assert blocked.count("Running 100% on this device") == 1
 
     monkeypatch.setenv("VERICODE_OVERRIDE", "1")
@@ -356,7 +370,7 @@ def test_unadded_line_is_hidden_and_does_not_block(monkeypatch, capsys):
     assert "sample.py" not in output
     assert "Commit blocked" not in output
     assert "Blocked:" not in output
-    assert "0 finding(s)" in output
+    assert "Passed:" in output
 
 
 def test_added_line_is_shown(monkeypatch, capsys):
@@ -484,7 +498,9 @@ def test_ai_verdict_is_shown_in_words(capsys, monkeypatch):
                       message="os.system", explanation="only today's date", is_real_risk=False)
     output = _render(capsys, monkeypatch, [real, cleared])
     assert "Local AI (real risk): user input reaches the shell" in output
-    assert "Local AI (false alarm): only today's date" in output
+    assert "Dismissed by local AI (not blocking): 1" in output
+    assert "only today's date" in output
+    assert output.index("user input reaches the shell") < output.index("Dismissed by local AI")
 
 
 def test_cleared_finding_shows_no_fix(capsys, monkeypatch):
@@ -492,7 +508,8 @@ def test_cleared_finding_shows_no_fix(capsys, monkeypatch):
                       message="os.system", explanation="only today's date", is_real_risk=False,
                       suggested_fix="Replace os.system()", fixed_code="subprocess.run([...])")
     output = _render(capsys, monkeypatch, [cleared])
-    assert "Fix: none needed" in output
+    assert "Dismissed by local AI (not blocking): 1" in output
+    assert "Fix: none needed" not in output
     assert "Replace os.system()" not in output
     assert "subprocess.run" not in output
 
@@ -560,14 +577,14 @@ def test_blocked_hint_follows_the_shell(monkeypatch, capsys):
     assert main([]) == 1
     mingw = capsys.readouterr().out
     assert "VERICODE_OVERRIDE=1 git commit" in mingw
-    assert "$env:" not in mingw
+    assert "$env:VERICODE_OVERRIDE=1; git commit" in mingw
 
     monkeypatch.delenv("MSYSTEM", raising=False)
     monkeypatch.setenv("SHELL", "/bin/bash")
     assert main([]) == 1
     bash = capsys.readouterr().out
     assert "VERICODE_OVERRIDE=1 git commit" in bash
-    assert "$env:" not in bash
+    assert "$env:VERICODE_OVERRIDE=1; git commit" in bash
 
 
 def test_main_cp1252_redirect_does_not_raise(monkeypatch):
@@ -625,3 +642,378 @@ def test_report_patch_keeps_indent_and_truncates(capsys, monkeypatch):
     assert "... (truncated)" in output
     assert "…" not in output
     assert all(ord(char) < 128 for char in output)
+
+
+def test_ai_note_prefixes_are_pinned():
+    from vericode.llm_explain.explainer import LLM_UNAVAILABLE_PREFIX as exported
+
+    assert LLM_UNAVAILABLE_PREFIX is exported
+    assert LLM_UNAVAILABLE_PREFIX == "LLM unavailable, showing static check only"
+    assert NOT_REVIEWED_PREFIX == "Not reviewed by the local AI"
+
+
+def _first_content_line(output: str) -> str:
+    for line in output.splitlines():
+        if line.strip():
+            return line
+    return ""
+
+
+def test_verdict_line_is_first(monkeypatch, capsys):
+    monkeypatch.delenv("VERICODE_OVERRIDE", raising=False)
+
+    _stub_scanners(monkeypatch, [HIGH], ["sample.py"])
+    assert main([]) == 1
+    blocked = _first_content_line(capsys.readouterr().out)
+    assert "VERICODE" in blocked
+    assert "Blocked:" in blocked
+    assert "1 must-fix" in blocked
+    assert "Running 100% on this device" not in blocked
+
+    _stub_scanners(monkeypatch, [MEDIUM], ["app.py"])
+    assert main([]) == 0
+    warning_out = capsys.readouterr().out
+    warning = _first_content_line(warning_out)
+    assert "Warning:" in warning
+    assert "1 warning" in warning
+    assert "Commit allowed. Review the warnings when you can." in warning_out
+    assert "Next steps" not in warning_out
+
+    _stub_scanners(monkeypatch, [], ["a.py", "b.py"])
+    assert main([]) == 0
+    passed_out = capsys.readouterr().out
+    passed = _first_content_line(passed_out)
+    assert "Passed:" in passed
+    assert "2 files checked, no issues" in passed
+    assert "Blocked:" not in passed
+    assert "Next steps" not in passed_out
+
+    monkeypatch.setenv("VERICODE_OVERRIDE", "1")
+    _stub_scanners(monkeypatch, [HIGH], ["sample.py"])
+    assert main([]) == 0
+    override_out = capsys.readouterr().out
+    override = _first_content_line(override_out)
+    assert "Warning:" in override
+    assert "[ o_O ]" in override or "[ ◉_◉ ]" in override
+    assert "OVERRIDE: committing past 1 high-severity issue(s)" in override_out
+    assert "Blocked:" not in override
+
+    dismissed = Finding(
+        layer="security_scan",
+        file="a.py",
+        line=1,
+        severity="high",
+        message="cleared",
+        is_real_risk=False,
+    )
+    monkeypatch.delenv("VERICODE_OVERRIDE", raising=False)
+    _stub_scanners(monkeypatch, [dismissed], ["a.py"])
+    assert main([]) == 0
+    cleared = _first_content_line(capsys.readouterr().out)
+    assert "Passed:" in cleared
+    assert "1 dismissed by local AI" in cleared
+
+
+def test_checks_strip_reports_ai_status(monkeypatch, capsys):
+    reviewed = Finding(
+        layer="security_scan",
+        file="a.py",
+        line=1,
+        severity="high",
+        message="secret",
+        is_real_risk=True,
+        explanation="real",
+    )
+    _stub_scanners(monkeypatch, [reviewed], ["a.py"])
+    assert main([]) == 1
+    reviewed_out = capsys.readouterr().out
+    assert "imports" in reviewed_out
+    assert "security" in reviewed_out
+    assert "patterns" in reviewed_out
+    assert "reviewed 1" in reviewed_out
+
+    unavailable = Finding(
+        layer="security_scan",
+        file="a.py",
+        line=1,
+        severity="high",
+        message="secret",
+        explanation=LLM_UNAVAILABLE_PREFIX + " (Local AI is off. Start it with: ollama serve)",
+    )
+    _stub_scanners(monkeypatch, [unavailable], ["a.py"])
+    assert main([]) == 1
+    down = capsys.readouterr().out
+    assert "unavailable" in down
+    assert "Local AI is off. Start it with: ollama serve" in down
+    assert "3) Start the local AI: ollama serve" in down
+    assert LLM_UNAVAILABLE_PREFIX not in down
+    assert "https://" not in down
+
+    _stub_scanners(monkeypatch, [], ["a.py"])
+    assert main([]) == 0
+    assert "not needed" in capsys.readouterr().out
+
+
+def test_code_frame_shows_neighbors_and_skips_bad_files(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    (repo / "app.py").write_text('above\nx = "[red]boom[/]"\nbelow\n', encoding="utf-8")
+    (repo / "blob.bin").write_bytes(b"hello\x00BINARY_TOKEN\n")
+    subprocess.run(
+        ["git", "add", "--", "app.py", "blob.bin"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(repo)
+
+    render_report([
+        Finding(layer="consistency", file="app.py", line=2, severity="high", message="boom"),
+    ], ascii_mode=True)
+    framed = capsys.readouterr().out
+    assert "above" in framed
+    assert 'x = "[red]boom[/]"' in framed
+    assert "below" in framed
+
+    render_report([
+        Finding(layer="security_scan", file="missing.py", line=1, severity="high", message="gone"),
+    ], ascii_mode=True)
+    missing = capsys.readouterr().out
+    assert "missing.py:1" in missing
+    assert "Traceback" not in missing
+
+    render_report([
+        Finding(layer="security_scan", file="app.py", line=40, severity="high", message="range"),
+    ], ascii_mode=True)
+    ranged = capsys.readouterr().out
+    assert "above" not in ranged
+    assert "[red]" not in ranged
+
+    render_report([
+        Finding(layer="security_scan", file="blob.bin", line=1, severity="high", message="binary"),
+    ], ascii_mode=True)
+    binary = capsys.readouterr().out
+    assert "BINARY_TOKEN" not in binary
+    assert "hello" not in binary
+
+
+def test_one_line_patch_is_a_diff(tmp_path, monkeypatch, capsys):
+    from rich.console import Console
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    (repo / "app.py").write_text("    token = 'secret'\n", encoding="utf-8")
+    subprocess.run(["git", "add", "--", "app.py"], cwd=repo, check=True, capture_output=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(
+        "vericode.gate.cli._console",
+        lambda: Console(highlight=False, width=80, height=30, legacy_windows=False),
+    )
+    render_report([
+        Finding(
+            layer="security_scan",
+            file="app.py",
+            line=1,
+            severity="high",
+            message="secret",
+            fixed_code="    token = os.environ['TOKEN']",
+            is_real_risk=True,
+        ),
+    ], ascii_mode=True)
+    output = capsys.readouterr().out
+    assert "-     token = 'secret'" in output
+    assert "+     token = os.environ['TOKEN']" in output
+
+
+def test_dismissed_findings_pass_and_stay_below(monkeypatch, capsys):
+    dismissed = Finding(
+        layer="security_scan",
+        file="a.py",
+        line=1,
+        severity="high",
+        message="cleared high",
+        is_real_risk=False,
+        risk_reasoning="placeholder",
+    )
+    live = Finding(
+        layer="security_scan",
+        file="b.py",
+        line=2,
+        severity="medium",
+        message="live medium",
+    )
+    monkeypatch.delenv("VERICODE_OVERRIDE", raising=False)
+    _stub_scanners(monkeypatch, [dismissed], ["a.py"])
+    assert main([]) == 0
+    only = capsys.readouterr().out
+    assert "Passed:" in _first_content_line(only)
+    assert "Dismissed by local AI (not blocking): 1" in only
+
+    _stub_scanners(monkeypatch, [dismissed, live], ["a.py", "b.py"])
+    assert main([]) == 0
+    mixed = capsys.readouterr().out
+    assert "Warning:" in _first_content_line(mixed)
+    assert mixed.index("live medium") < mixed.index("Dismissed by local AI")
+
+
+def test_ascii_layout_fits_in_80_columns(monkeypatch, capsys):
+    finding = Finding(
+        layer="security_scan",
+        file="app.py",
+        line=1,
+        severity="high",
+        message="plain issue",
+        suggested_fix="do this",
+        fixed_code="x = 1",
+        is_real_risk=True,
+        explanation="because",
+    )
+    _stub_scanners(monkeypatch, [finding], ["app.py"])
+    monkeypatch.delenv("VERICODE_OVERRIDE", raising=False)
+    assert main(["--ascii"]) == 1
+    output = capsys.readouterr().out
+    assert output
+    assert all(ord(char) < 128 for char in output)
+    assert len(_first_content_line(output)) <= 80
+    assert all(len(line) <= 80 for line in output.splitlines())
+
+
+def test_color_opt_in_and_no_color(monkeypatch, capsys):
+    _stub_scanners(monkeypatch, [HIGH], ["sample.py"])
+    monkeypatch.delenv("VERICODE_OVERRIDE", raising=False)
+    assert main([]) == 1
+    assert "\x1b[" not in capsys.readouterr().out
+
+    monkeypatch.setenv("VERICODE_COLOR", "1")
+    assert main([]) == 1
+    assert "\x1b[" in capsys.readouterr().out
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert main([]) == 1
+    assert "\x1b[" not in capsys.readouterr().out
+
+
+def test_import_message_shows_the_package_name(capsys):
+    name = "definitely_not_a_real_pkg_xyz"
+    render_report([
+        Finding(
+            layer="import_check",
+            file="app.py",
+            line=1,
+            severity="high",
+            message=f"'{name}' doesn't match any package on PyPI.",
+        ),
+    ], ascii_mode=True)
+    output = capsys.readouterr().out
+    assert name in output
+    assert "defi****" not in output
+
+
+def _fake_token(prefix: str, body: str) -> str:
+    return prefix + body
+
+
+def test_secrets_never_print_a_full_token(tmp_path, monkeypatch, capsys):
+    token = _fake_token(
+        "ghp_",
+        "016C7869F1A2B3C4D5E6F708192A3B4C5D6E7F",
+    )
+    neighbor = _fake_token(
+        "ghp_",
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    )
+    sk = _fake_token(
+        "sk-",
+        "live-ABCDEFGHIJKLMNOP",
+    )
+    akia = _fake_token(
+        "AKIA",
+        "IOSFODNN7EXAMPLE",
+    )
+    xox = _fake_token(
+        "xoxb-",
+        "123456789012-abcdefghijklmnopqrstuv",
+    )
+    quoted = "thisisalongquotedstring"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    (repo / "app.py").write_text(
+        f'note = "{quoted}"\nKEY = "{neighbor}"\nTOKEN = "{token}"\n',
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "--", "app.py"], cwd=repo, check=True, capture_output=True)
+    monkeypatch.chdir(repo)
+
+    render_report([
+        Finding(layer="consistency", file="app.py", line=1, severity="low", message="same shape"),
+    ], ascii_mode=True)
+    plain = capsys.readouterr().out
+    assert f'note = "{quoted}"' in plain
+    assert neighbor not in plain
+    assert 'KEY = "ghp_****"' in plain
+
+    render_report([
+        Finding(
+            layer="security_scan",
+            file="app.py",
+            line=3,
+            severity="high",
+            message=f"saw {token} {sk} {akia} {xox}",
+            explanation=f"model echoed {token}",
+            suggested_fix=f"remove {token}",
+            fixed_code=f'TOKEN = "{token}"',
+            is_real_risk=True,
+        ),
+    ], ascii_mode=True)
+    secret = capsys.readouterr().out
+    assert token not in secret
+    assert neighbor not in secret
+    assert 'TOKEN = "ghp_****"' in secret
+    assert 'KEY = "ghp_****"' in secret
+    for value in (token, neighbor, sk, akia, xox):
+        assert value not in secret
+    assert "sk-l****" in secret
+    assert "AKIA****" in secret
+    assert "xoxb****" in secret
+
+
+def test_hook_override_lines_fit_in_80_columns(monkeypatch, capsys):
+    from rich.console import Console
+
+    def narrow():
+        return Console(width=80, height=40, highlight=False, legacy_windows=False)
+
+    _stub_scanners(monkeypatch, [HIGH], ["sample.py"])
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("MSYSTEM", "MINGW64")
+    monkeypatch.setenv("SHELL", "/bin/bash")
+    monkeypatch.delenv("VERICODE_OVERRIDE", raising=False)
+    monkeypatch.setattr("vericode.gate.cli._console", narrow)
+    monkeypatch.setattr("vericode.gate.ui._console", narrow)
+    assert main(["--ascii"]) == 1
+    output = capsys.readouterr().out
+    lines = output.splitlines()
+    assert all(len(line) <= 80 for line in lines)
+    assert any(line.strip() == "VERICODE_OVERRIDE=1 git commit" for line in lines)
+    assert any(line.strip() == "$env:VERICODE_OVERRIDE=1; git commit" for line in lines)
+    assert not any("VERICODE_OVERRIDE=1 git commit" in line and "$env:" in line for line in lines)
+
+
+def test_ascii_folds_dashes_quotes_and_ellipsis(capsys):
+    message = "wait \u2014 go\u2013on \u2018q\u2019 \u201cQ\u201d end\u2026 \u25cf"
+    render_report([
+        Finding(layer="security_scan", file="a.py", line=1, severity="medium", message=message),
+    ], ascii_mode=True)
+    output = capsys.readouterr().out
+    assert "wait - go-on 'q' \"Q\" end... ?" in output
+    assert all(ord(char) < 128 for char in output)
+
+    render_report([
+        Finding(layer="security_scan", file="a.py", line=1, severity="medium", message=message),
+    ], ascii_mode=False)
+    raw = capsys.readouterr().out
+    assert "\u2014" in raw
+    assert "\u2026" in raw

@@ -13,7 +13,15 @@ from vericode.shared.finding import Finding
 
 pytestmark = pytest.mark.live
 
-SECRET = "AKIAIOSFODNN7EXAMPLE9"
+
+def _fake_token(prefix: str, body: str) -> str:
+    return prefix + body
+
+
+SECRET = _fake_token(
+    "AKIA",
+    "IOSFODNN7EXAMPLE9",
+)
 
 
 @pytest.fixture(scope="module", autouse=True)

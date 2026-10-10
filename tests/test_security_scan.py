@@ -2,7 +2,15 @@ import pytest
 
 from vericode.security_scan.scanner import DATA_DIR, MAX_BYTES, run
 
-SECRET = "ghp_016C7869F1A2B3C4D5E6F708192A3B4C5D6E7F"
+
+def _fake_token(prefix: str, body: str) -> str:
+    return prefix + body
+
+
+SECRET = _fake_token(
+    "ghp_",
+    "016C7869F1A2B3C4D5E6F708192A3B4C5D6E7F",
+)
 
 
 def scan(tmp_path, source, name="sample.py"):

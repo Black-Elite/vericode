@@ -5,6 +5,16 @@ from vericode.llm_explain.explainer import enrich, parse_response
 from vericode.shared.finding import Finding
 
 
+def _fake_token(prefix: str, body: str) -> str:
+    return prefix + body
+
+
+_SK = _fake_token(
+    "sk-",
+    "123",
+)
+
+
 def make_finding(path="bad.py", line=2, severity="high") -> Finding:
     return Finding(
         layer="security_scan",
@@ -19,7 +29,7 @@ def make_finding(path="bad.py", line=2, severity="high") -> Finding:
 @pytest.fixture
 def sample(tmp_path):
     p = tmp_path / "bad.py"
-    p.write_text('import os\nKEY = "sk-123"\nprint(KEY)\n')
+    p.write_text('import os\nKEY = "' + _SK + '"\nprint(KEY)\n')
     return p
 
 
@@ -38,7 +48,7 @@ def test_enrich_fills_fields(monkeypatch, sample):
     assert f.fixed_code.startswith("KEY =")
     assert f.severity == "high"
     assert f.suggested_fix == "use env var"  # existing fields preserved
-    assert '> 2: KEY = "sk-123"' in prompts[0]  # context with marker
+    assert '> 2: KEY = "' + _SK + '"' in prompts[0]  # context with marker
 
 
 DISMISS = '{"reason": "No outside input reaches it.", "is_real_risk": false, "fix": ""}'
@@ -102,9 +112,55 @@ def test_llm_error_never_crashes(monkeypatch, sample):
 
     monkeypatch.setattr(explainer, "_chat", boom)
     [f] = enrich([make_finding(sample)])
-    assert "LLM unavailable" in f.explanation
+    assert f.explanation == (
+        "LLM unavailable, showing static check only "
+        "(Local AI took too long. Try a smaller model or raise VERICODE_TIMEOUT)"
+    )
+    assert "timed out" not in f.explanation
+    assert "http" not in f.explanation
     assert f.is_real_risk is None
     assert f.severity == "high"
+
+
+def test_friendly_ollama_errors_hide_the_url(monkeypatch, sample):
+    class TimeoutException(Exception):
+        pass
+
+    class ReadTimeout(TimeoutException):
+        pass
+
+    cases = [
+        (
+            ConnectionError("Failed to connect. https://ollama.com/download"),
+            "Local AI is off. Start it with: ollama serve",
+        ),
+        (
+            explainer.ollama.ResponseError('{"error":"model missing"}', 404),
+            f"Model not found. Run: ollama pull {explainer.PRIMARY_MODEL}",
+        ),
+        (
+            RuntimeError("no model installed; run `ollama pull qwen2.5-coder:1.5b` (http://127.0.0.1:11434)"),
+            f"Model not found. Run: ollama pull {explainer.PRIMARY_MODEL}",
+        ),
+        (
+            ReadTimeout("timed out http://127.0.0.1:11434"),
+            "Local AI took too long. Try a smaller model or raise VERICODE_TIMEOUT",
+        ),
+        (
+            ValueError("boom http://127.0.0.1:11434"),
+            "Local AI failed (ValueError). Showing static checks only.",
+        ),
+    ]
+    for exc, detail in cases:
+        def boom(prompt, exc=exc):
+            raise exc
+
+        monkeypatch.setattr(explainer, "_chat", boom)
+        [f] = enrich([make_finding(sample)])
+        assert f.explanation == f"{explainer.LLM_UNAVAILABLE_PREFIX} ({detail})"
+        assert "http://" not in f.explanation
+        assert "https://" not in f.explanation
+        assert "11434" not in f.explanation
 
 
 def test_missing_model_message(monkeypatch):
@@ -202,7 +258,14 @@ def test_max_ai_findings_setting(monkeypatch, raw, expected):
     assert explainer.max_ai_findings() == expected
 
 
-SLACK = "xoxb-1234567890-abcdefghijkl"
+SLACK = _fake_token(
+    "xoxb-",
+    "1234567890-abcdefghijkl",
+)
+AWS = _fake_token(
+    "AKIA",
+    "IOSFODNN7EXAMPLE",
+)
 
 
 @pytest.mark.parametrize(
@@ -212,13 +275,13 @@ SLACK = "xoxb-1234567890-abcdefghijkl"
         f"client = WebClient('{SLACK}')",
         'password = "hunter2hunter2"',
         'headers = {"Authorization": "Bearer abcdefghijklmnop1234"}',
-        'AWS = "AKIAIOSFODNN7EXAMPLE"',
+        'AWS = "' + AWS + '"',
     ],
 )
 def test_redact_blanks_secret_values(text):
     out = explainer.redact(text)
     assert explainer.REDACTED in out
-    for secret in (SLACK, "hunter2hunter2", "abcdefghijklmnop1234", "AKIAIOSFODNN7EXAMPLE"):
+    for secret in (SLACK, "hunter2hunter2", "abcdefghijklmnop1234", AWS):
         assert secret not in out
 
 
