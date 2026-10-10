@@ -11,13 +11,8 @@ the machine.
 
 Built for **AppBuildersPH Hackathon 2026** (theme: Local AI).
 
-## Demo
-
-A commit being blocked, judged by the local AI, fixed, and allowed through —
-recorded on a laptop with no GPU. To run it yourself, see [`demo_repo/`](demo_repo/).
-
 <details>
-<summary><b>Watch the recording</b></summary>
+<summary><b>Watch it run</b> — a commit blocked, judged by the local AI, fixed, and allowed through, on a laptop with no GPU.</summary>
 
 ![Vericode blocking a commit](assets/demo.gif)
 
@@ -80,11 +75,34 @@ Python client, the Qwen2.5-Coder 1.5B model) is installed by `./setup.sh`.
 ## Setup
 
 ```bash
-./setup.sh      # one-time: uv sync, pulls the model, caches Semgrep rules, builds the PyPI name lists
-uv run pre-commit install
+git clone https://github.com/Black-Elite/vericode.git
+cd vericode
+./setup.sh                 # one-time: uv sync, pulls the model, caches Semgrep rules, builds the PyPI name lists
+uv run vericode doctor     # checks everything is ready, and prints the fix for anything that isn't
 ```
 
 Needs internet only for this one-time step. Everything runs offline after.
+
+## Use it on your own project
+
+From the `vericode` folder, point it at any git repo:
+
+```bash
+uv run vericode install ~/path/to/your-project
+```
+
+That adds Vericode to the project's `.pre-commit-config.yaml` (any hooks
+already there are kept) and turns on the git hook. Every `git commit` in that
+project is now checked. Running it again is safe.
+
+Keep Ollama running (`ollama serve`) while you work. Without it, commits still
+get the static checks, but no AI verdicts.
+
+| Command | What it does |
+|---|---|
+| `uv run vericode install <path>` | Turns the hook on in a repo |
+| `uv run vericode doctor` | Checks git, uv, Ollama, the model and the offline lists; prints the fix for each problem |
+| `./demo_repo/demo.sh reset` | Builds a demo repo to try it on (see Demo below) |
 
 ## Usage
 

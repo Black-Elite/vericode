@@ -404,3 +404,22 @@ def test_consistency_findings_keep_the_layers_exact_fix(monkeypatch, tmp_path):
     assert r.explanation == "Every other handler checks first."
     assert r.fixed_code is None
     assert r.suggested_fix == "Add check_owner(note, user)"
+
+
+def test_repair_code_drops_a_single_stray_quote():
+    from vericode.llm_explain.explainer import repair_code
+    broken = "subprocess.run(['ping', '-c', '1', host'], check=True)"
+    assert repair_code(broken) == "subprocess.run(['ping', '-c', '1', host], check=True)"
+
+
+def test_repair_code_leaves_valid_code_and_prose_alone():
+    from vericode.llm_explain.explainer import repair_code
+    assert repair_code("x = os.environ['KEY']") == "x = os.environ['KEY']"
+    prose = "Move it to an environment variable, then rotate it"
+    assert repair_code(prose) == prose
+    assert repair_code(None) is None
+
+
+def test_repair_code_does_not_merge_strings():
+    from vericode.llm_explain.explainer import repair_code
+    assert repair_code("print('a', 'b', c')") == "print('a', 'b', c)"

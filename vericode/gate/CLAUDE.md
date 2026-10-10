@@ -46,3 +46,9 @@ This module imports `import_check.run()`, `security_scan.run()`, and
 staying the same shape. If any of those three change their signature, tell
 the team immediately — this is the one place someone else's change can break
 your work.
+
+## Commands (`commands.py`)
+
+- `uv run vericode install [path]`: adds the hook to that repo's `.pre-commit-config.yaml` (keeping other hooks) and runs `pre-commit install`. The hook entry points at this checkout with `uv run --project`.
+- `uv run vericode doctor`: checks git, uv, Ollama (installed, running, model pulled), the PyPI lists, Betterleaks, Semgrep rules and the hook in the current repo; prints the fix for each failure. Exits 1 if a required check fails.
+- With no command, `vericode` runs as the hook, as before.
