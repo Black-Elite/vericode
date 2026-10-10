@@ -5,9 +5,11 @@ via a local Ollama model. See CLAUDE.md in this folder for the full spec.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
+import textwrap
 from functools import lru_cache
 from pathlib import Path
 
@@ -231,6 +233,28 @@ def parse_response(raw: str) -> dict:
     }
 
 
+def repair_code(code: str | None) -> str | None:
+    """Small models sometimes leave one stray quote in otherwise valid code
+    (`host'],` for `host],`). If deleting a single quote makes the fix parse,
+    use that; anything else, including prose fixes, is returned unchanged."""
+    if not code:
+        return code
+    def parses(text: str) -> bool:
+        try:
+            ast.parse(textwrap.dedent(text))
+            return True
+        except SyntaxError:
+            return False
+    if parses(code):
+        return code
+    # From the end: deleting an earlier quote can also parse, by merging
+    # strings ('1', host' -> '1, host').
+    for i in reversed(range(len(code))):
+        if code[i] in "'\"" and parses(candidate := code[:i] + code[i + 1:]):
+            return candidate
+    return code
+
+
 def _enrich_one(finding: Finding) -> None:
     facts = evidence.gather(finding)
     prompt = PROMPT_PREFIX + FINDING_TEMPLATE.format(
@@ -252,7 +276,7 @@ def _enrich_one(finding: Finding) -> None:
     finding.is_real_risk = clean["is_real_risk"]
     finding.risk_reasoning = clean["risk_reasoning"]
     finding.explanation = clean["explanation"]
-    finding.fixed_code = clean["fixed_code"]
+    finding.fixed_code = repair_code(clean["fixed_code"])
     if finding.layer == "consistency":
         # the layer already names the exact missing call; the model tends to copy
         # the prompt's example guard instead
